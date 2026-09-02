@@ -1,8 +1,8 @@
 # Mecanum Drive Calibration Report
 
-Summary of building and calibrating `default_control.py` for the mecanum
-chassis, kept for reference if the robot is rewired or a motor/board is
-swapped later.
+Summary of building and calibrating the mecanum drive (`movement.py`),
+kept for reference if the robot is rewired or a motor/board is swapped
+later.
 
 ## What the robot is
 
@@ -26,16 +26,17 @@ Plus a start button (BCM21) and an HC-SR04 ultrasonic sensor (TRIG=BCM10, ECHO=B
 the *front* wheel, but the right board's first channel pair (IN5/IN6) is
 the *rear* wheel. The two boards were not wired with the same front/rear
 convention. This was only found by testing each wheel in isolation with
-the `1`/`2`/`3`/`4` calibration keys in `default_control.py` — don't
-assume symmetry if this ever needs re-wiring.
+`MecanumDrive.test_wheel()` (the `1`/`2`/`3`/`4` keys in
+`default_control.py` call it) — don't assume symmetry if this ever needs
+re-wiring.
 
 ## Calibration constants (current values)
 
-In `default_control.py`:
+In `movement.py`:
 
 ```python
-SPEED = 60            # straight driving duty cycle %
-STRAFE_SPEED = 55      # strafe duty cycle % (lower than SPEED, see below)
+DEFAULT_SPEED = 60            # straight driving duty cycle %
+DEFAULT_STRAFE_SPEED = 55      # strafe duty cycle % (lower than SPEED, see below)
 WHEEL_INVERT = {"fl": False, "fr": False, "rl": False, "rr": True}
 WHEEL_TRIM   = {"fl": 0.9,   "fr": 0.9,   "rl": 1.0,   "rr": 1.0}
 ```
@@ -48,7 +49,7 @@ WHEEL_TRIM   = {"fl": 0.9,   "fr": 0.9,   "rl": 1.0,   "rr": 1.0}
   RL/RR — no two DC motors spin at exactly the same RPM at the same duty
   cycle, and strafing needs much tighter matching than straight driving to
   avoid drifting at an angle or rotating.
-- **`STRAFE_SPEED` (55) vs `SPEED` (60)**: strafing is the only command
+- **`DEFAULT_STRAFE_SPEED` (55) vs `DEFAULT_SPEED` (60)**: strafing is the only command
   that drives both channels on the *same* board in opposite directions at
   once (straight driving and rotation always keep a board's two channels
   in sync). That combination can couple back-EMF/current-spike noise
@@ -90,3 +91,16 @@ WHEEL_TRIM   = {"fl": 0.9,   "fr": 0.9,   "rl": 1.0,   "rr": 1.0}
 Re-run the `1`/`2`/`3`/`4` calibration keys first, before touching
 `WHEEL_INVERT` or `WHEEL_TRIM` — confirm each key spins the wheel it
 claims to. Don't assume the two boards match each other's channel order.
+
+## Code structure
+
+All of the above (pin setup, calibration constants, movement logic) now
+lives in `movement.py` as a `MecanumDrive` class, not in
+`default_control.py`. This is so the same calibrated motor code can be
+reused by both keyboard testing (`default_control.py`) and the
+autonomous match code (perception → `MecanumDrive` calls), instead of
+being duplicated or copy-pasted between them. Every movement method
+(`forward`, `strafe_left`, etc.) accepts an optional `speed=` argument to
+override the default duty cycle for that call — e.g. `drive.forward(speed=30)`
+for a slow final approach to the ball vs. the default speed for
+repositioning.

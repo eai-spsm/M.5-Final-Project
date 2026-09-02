@@ -1,94 +1,36 @@
 import RPi.GPIO as GPIO
-from time import sleep, time
+from time import sleep
 
-# 1. Tell the Pi we are using BCM (GPIO labels), not physical board numbers
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
-
-
-# Battery is North
-
-# Board 1 - Left side
-ENA_L = 12  # enables IN1/IN2
-ENB_L = 18  # enables IN3/IN4
-IN1 = 4
-IN2 = 17
-IN3 = 27
-IN4 = 22
-
-# Board 2 - Right side
-ENA_R = 13  # enables IN5/IN6
-ENB_R = 23  # enables IN7/IN8
-IN5 = 5
-IN6 = 6
-IN7 = 19
-IN8 = 26
+from movement import MecanumDrive
 
 # Start button (pulled up, wired to GND when pressed)
 BTN_PIN = 21
 
-# Ultrasonic (HC-SR04)
-TRIG = 10
-ECHO = 9
-
-GPIO.setup(ENA_L, GPIO.OUT)
-GPIO.setup(ENB_L, GPIO.OUT)
-GPIO.setup(ENA_R, GPIO.OUT)
-GPIO.setup(ENB_R, GPIO.OUT)
-GPIO.setup(IN1, GPIO.OUT)
-GPIO.setup(IN2, GPIO.OUT)
-GPIO.setup(IN3, GPIO.OUT)
-GPIO.setup(IN4, GPIO.OUT)
-GPIO.setup(IN5, GPIO.OUT)
-GPIO.setup(IN6, GPIO.OUT)
-GPIO.setup(IN7, GPIO.OUT)
-GPIO.setup(IN8, GPIO.OUT)
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
 GPIO.setup(BTN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(TRIG, GPIO.OUT)
-GPIO.setup(ECHO, GPIO.IN)
-GPIO.output(TRIG, GPIO.LOW)
 
 
-def get_distance():
-    # Returns distance in cm, or None if the sensor timed out
+def main():
+    drive = MecanumDrive()
     try:
-        GPIO.output(TRIG, GPIO.HIGH)
-        sleep(0.00001)
-        GPIO.output(TRIG, GPIO.LOW)
+        print("Ready. Press the button to start...")
+        while True:
+            if GPIO.input(BTN_PIN) == GPIO.LOW:
+                print("Button pressed - starting...")
+                break
+            sleep(0.05)
 
-        timeout = time() + 0.04
-        while GPIO.input(ECHO) == GPIO.LOW:
-            pulse_start = time()
-            if pulse_start > timeout:
-                return None
+        # TODO: put your startup logic here (e.g. perception + drive loop)
 
-        timeout = time() + 0.04
-        while GPIO.input(ECHO) == GPIO.HIGH:
-            pulse_end = time()
-            if pulse_end > timeout:
-                return None
+    except KeyboardInterrupt:
+        print("\nProgram stopped by user.")
 
-        return (pulse_end - pulse_start) * 34300 / 2
-    except Exception as e:
-        print(f"Ultrasonic Read Error: {e}")
-        return None
+    finally:
+        print("Cleaning up GPIO resources...")
+        drive.cleanup()
+        print("Done!")
 
 
-# Wait for the start button, then hand off to the rest of the program
-try:
-    print("Ready. Press the button to start...")
-    while True:
-        if GPIO.input(BTN_PIN) == GPIO.LOW:
-            print("Button pressed - starting...")
-            break
-        sleep(0.05)
-
-    # TODO: put your startup logic here (e.g. call into default_control.main())
-
-except KeyboardInterrupt:
-    print("\nProgram stopped by user.")
-
-finally:
-    print("Cleaning up GPIO resources...")
-    GPIO.cleanup()
-    print("Done!")
+if __name__ == "__main__":
+    main()

@@ -48,12 +48,20 @@ Orientation: battery = North (front), Raspberry Pi = South (back).
 3. Copy this `final/` folder onto the Pi.
 4. Drop your trained weights into `data/best.pt` (and `data/data.yaml` if you plan to retrain).
 
+## Files
+
+- `movement.py` — the `MecanumDrive` class: all motor pin setup, calibration constants (`WHEEL_INVERT`, `WHEEL_TRIM`, speeds), and movement methods (`forward`, `backward`, `strafe_left/right`, `rotate_left/right`, `stop`, `test_wheel`, `get_distance`). Every movement method takes an optional `speed=` to override the default duty cycle for that call. Import this from anything that needs to drive the robot — keyboard control, autonomous ball-chasing logic, etc. — instead of duplicating motor code.
+- `default_control.py` — keyboard control: reads WASD/etc. from the terminal and calls into `MecanumDrive`. No motor logic of its own.
+- `main.py` — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive` here for the autonomous match code).
+- `test.py` — runs the YOLO model on the webcam feed (Pi-optimized: smaller inference size, frame skipping).
+- `train.py` — trains a YOLO model from `data/data.yaml` (run on a PC with a GPU, not on the Pi).
+
 ## Running
 
-- `python3 main.py` — sets up all GPIO pins, waits for the start button, then hands off to the rest of the program.
-- `python3 default_control.py` — keyboard control of the mecanum drive over the terminal.
-- `python3 test.py` — runs the YOLO model on the webcam feed (Pi-optimized: smaller inference size, frame skipping).
-- `python3 train.py` — trains a YOLO model from `data/data.yaml` (run on a PC with a GPU, not on the Pi).
+- `python3 main.py`
+- `python3 default_control.py`
+- `python3 test.py`
+- `python3 train.py`
 
 ## Controls
 
@@ -90,7 +98,7 @@ If W drives diagonally instead of straight, one wheel is physically wired backwa
 1. Jack the robot up (wheels off the ground) or watch it closely.
 2. Press **1**, **2**, **3**, **4** one at a time to spin FL, FR, RL, RR in isolation.
 3. Every wheel's roller pattern should push the robot generally forward when spun "forward" — find the one that pushes backward instead.
-4. In `default_control.py`, flip that wheel's entry in `WHEEL_INVERT` to `True` and re-test with W.
+4. In `movement.py`, flip that wheel's entry in `WHEEL_INVERT` to `True` and re-test with W.
 
 ### Calibrating strafe (A/D)
 
