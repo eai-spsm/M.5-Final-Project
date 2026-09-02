@@ -1,6 +1,6 @@
 # Mecanum Drive Calibration Report
 
-Summary of building and calibrating the mecanum drive (`movement.py`),
+Summary of building and calibrating the mecanum drive (`movement/movement.py`),
 kept for reference if the robot is rewired or a motor/board is swapped
 later.
 
@@ -32,7 +32,7 @@ re-wiring.
 
 ## Calibration constants (current values)
 
-In `movement.py`:
+In `movement/movement.py`:
 
 ```python
 DEFAULT_SPEED = 60            # straight driving duty cycle %
@@ -95,7 +95,7 @@ claims to. Don't assume the two boards match each other's channel order.
 ## Code structure
 
 All of the above (pin setup, calibration constants, movement logic) now
-lives in `movement.py` as a `MecanumDrive` class, not in
+lives in `movement/movement.py` as a `MecanumDrive` class, not in
 `default_control.py`. This is so the same calibrated motor code can be
 reused by both keyboard testing (`default_control.py`) and the
 autonomous match code (perception → `MecanumDrive` calls), instead of

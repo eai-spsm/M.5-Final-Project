@@ -2,7 +2,7 @@
 
 Raspberry Pi 4 robot: 4-motor drive (2x L298N-style drivers) + YOLO camera detection.
 
-See [CALIBRATION_REPORT.md](CALIBRATION_REPORT.md) for the full mecanum wiring map, current tuning constants, and the debugging history behind them.
+See [docs/CALIBRATION_REPORT.md](docs/CALIBRATION_REPORT.md) for the full mecanum wiring map, current tuning constants, and the debugging history behind them.
 
 ## Hardware
 
@@ -46,22 +46,38 @@ Orientation: battery = North (front), Raspberry Pi = South (back).
    pip3 install RPi.GPIO ultralytics
    ```
 3. Copy this `final/` folder onto the Pi.
-4. Drop your trained weights into `data/best.pt` (and `data/data.yaml` if you plan to retrain).
+4. Drop your trained weights into `perception/data/best.pt` (and `perception/data/data.yaml` if you plan to retrain).
 
-## Files
+## Layout
 
-- `movement.py` — the `MecanumDrive` class: all motor pin setup, calibration constants (`WHEEL_INVERT`, `WHEEL_TRIM`, speeds), and movement methods (`forward`, `backward`, `strafe_left/right`, `rotate_left/right`, `stop`, `test_wheel`, `get_distance`). Every movement method takes an optional `speed=` to override the default duty cycle for that call. Import this from anything that needs to drive the robot — keyboard control, autonomous ball-chasing logic, etc. — instead of duplicating motor code.
-- `default_control.py` — keyboard control: reads WASD/etc. from the terminal and calls into `MecanumDrive`. No motor logic of its own.
-- `main.py` — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive` here for the autonomous match code).
-- `test.py` — runs the YOLO model on the webcam feed (Pi-optimized: smaller inference size, frame skipping).
-- `train.py` — trains a YOLO model from `data/data.yaml` (run on a PC with a GPU, not on the Pi).
+```
+final/
+├── main.py              # entry point: start button -> hands off to match logic
+├── default_control.py   # keyboard control (testing/manual driving)
+├── movement/
+│   ├── __init__.py
+│   └── movement.py       # MecanumDrive class - all motor/GPIO logic lives here
+├── perception/
+│   ├── test.py            # YOLO detection on the webcam feed
+│   ├── train.py           # trains a YOLO model (run on a PC with a GPU)
+│   └── data/               # best.pt / data.yaml go here
+└── docs/
+    ├── CALIBRATION_REPORT.md
+    └── กติกาการแข่งขันหุ่นยนต์แตะบอล.md / .pdf   # competition rules
+```
+
+- **`movement/`** — the `MecanumDrive` class: all motor pin setup, calibration constants (`WHEEL_INVERT`, `WHEEL_TRIM`, speeds), and movement methods (`forward`, `backward`, `strafe_left/right`, `rotate_left/right`, `stop`, `test_wheel`, `get_distance`). Every movement method takes an optional `speed=` to override the default duty cycle for that call. Import with `from movement import MecanumDrive` from anything that needs to drive the robot — keyboard control, autonomous ball-chasing logic, etc. — instead of duplicating motor code.
+- **`default_control.py`** — keyboard control: reads WASD/etc. from the terminal and calls into `MecanumDrive`. No motor logic of its own.
+- **`main.py`** — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive` here for the autonomous match code).
+- **`perception/`** — camera/YOLO code: `test.py` runs detection on the webcam feed (Pi-optimized: smaller inference size, frame skipping), `train.py` trains a model from `perception/data/data.yaml`.
+- **`docs/`** — the calibration report and the competition rules.
 
 ## Running
 
 - `python3 main.py`
 - `python3 default_control.py`
-- `python3 test.py`
-- `python3 train.py`
+- `python3 perception/test.py`
+- `python3 perception/train.py`
 
 ## Controls
 
@@ -98,7 +114,7 @@ If W drives diagonally instead of straight, one wheel is physically wired backwa
 1. Jack the robot up (wheels off the ground) or watch it closely.
 2. Press **1**, **2**, **3**, **4** one at a time to spin FL, FR, RL, RR in isolation.
 3. Every wheel's roller pattern should push the robot generally forward when spun "forward" — find the one that pushes backward instead.
-4. In `movement.py`, flip that wheel's entry in `WHEEL_INVERT` to `True` and re-test with W.
+4. In `movement/movement.py`, flip that wheel's entry in `WHEEL_INVERT` to `True` and re-test with W.
 
 ### Calibrating strafe (A/D)
 
