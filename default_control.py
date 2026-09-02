@@ -72,7 +72,7 @@ WHEEL_INVERT = {"fl": False, "fr": False, "rl": False, "rr": True}
 # sideways, the wheels aren't spinning at exactly matched speeds even at the
 # same duty cycle - lower the trim on whichever wheel is "winning" until it
 # cancels out.
-WHEEL_TRIM = {"fl": 1.0, "fr": 0.85, "rl": 0.85, "rr": 1.0}
+WHEEL_TRIM = {"fl": 1.15, "fr": 1.0, "rl": 1.0, "rr": 1.15}
 
 
 def get_distance():
@@ -129,7 +129,8 @@ def set_wheels(fl, fr, rl, rr, speed=SPEED):
             if WHEEL_INVERT[name]:
                 direction = -direction
             _wheel(pin_a, pin_b, forward=direction > 0)
-            pwms[name].ChangeDutyCycle(speed * WHEEL_TRIM[name])
+            duty = min(100, max(0, speed * WHEEL_TRIM[name]))
+            pwms[name].ChangeDutyCycle(duty)
 
 
 def test_wheel(name):
