@@ -72,7 +72,7 @@ WHEEL_INVERT = {"fl": False, "fr": False, "rl": False, "rr": True}
 # sideways, the wheels aren't spinning at exactly matched speeds even at the
 # same duty cycle - lower the trim on whichever wheel is "winning" until it
 # cancels out.
-WHEEL_TRIM = {"fl": 1.15, "fr": 1.0, "rl": 1.0, "rr": 1.15}
+WHEEL_TRIM = {"fl": 1.0, "fr": 1.0, "rl": 1.0, "rr": 1.0}
 
 
 def get_distance():
