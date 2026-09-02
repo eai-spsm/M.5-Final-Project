@@ -89,3 +89,7 @@ If W drives diagonally instead of straight, one wheel is physically wired backwa
 2. Press **1**, **2**, **3**, **4** one at a time to spin FL, FR, RL, RR in isolation.
 3. Every wheel's roller pattern should push the robot generally forward when spun "forward" — find the one that pushes backward instead.
 4. In `default_control.py`, flip that wheel's entry in `WHEEL_INVERT` to `True` and re-test with W.
+
+### Calibrating strafe (A/D)
+
+Once W/S/Q/E drive straight and rotate cleanly, A/D can still drift at an angle or rotate slightly instead of going purely sideways — this is normal, since strafing needs much tighter matching between wheel speeds than straight driving does, and no two motors spin at exactly the same RPM at the same duty cycle. Fix it with `WHEEL_TRIM` (a per-wheel speed multiplier, default `1.0` for all four): press A, see which side the robot rotates toward, and slightly lower the trim (e.g. `0.9`) on the wheel(s) "winning" that rotation. Re-test and nudge again until A/D go straight sideways.
