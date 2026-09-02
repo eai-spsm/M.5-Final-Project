@@ -49,8 +49,30 @@ Orientation: battery = North (front), Raspberry Pi = South (back).
 ## Running
 
 - `python3 main.py` — sets up all GPIO pins, waits for the start button, then hands off to the rest of the program.
-- `python3 default_control.py` — keyboard control of the mecanum drive over the terminal: W/S forward/back, A/D strafe left/right, Q/E rotate left/right, space stop, X quit.
+- `python3 default_control.py` — keyboard control of the mecanum drive over the terminal.
 - `python3 test.py` — runs the YOLO model on the webcam feed (Pi-optimized: smaller inference size, frame skipping).
 - `python3 train.py` — trains a YOLO model from `data/data.yaml` (run on a PC with a GPU, not on the Pi).
 
-Press the start button wired to `BTN_PIN` (BCM 21) to begin.
+## Controls
+
+### Physical
+
+| Button | Pin | Action |
+| --- | --- | --- |
+| Start button | BTN_PIN (BCM 21) | `main.py` waits for this press once, then hands off to the rest of the program. |
+
+### Keyboard (`default_control.py`)
+
+| Key | Action |
+| --- | --- |
+| W | Drive forward |
+| S | Drive backward |
+| A | Strafe left |
+| D | Strafe right |
+| Q | Rotate left (CCW) |
+| E | Rotate right (CW) |
+| Space | Stop all wheels |
+| X | Quit (also cleans up GPIO) |
+| Ctrl+C | Quit (also cleans up GPIO) |
+
+Forward drive auto-blocks and stops if the ultrasonic sensor reads closer than `OBSTACLE_CM` (15cm default).
