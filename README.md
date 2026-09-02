@@ -2,6 +2,8 @@
 
 Raspberry Pi 4 robot: 4-motor drive (2x L298N-style drivers) + YOLO camera detection.
 
+See [CALIBRATION_REPORT.md](CALIBRATION_REPORT.md) for the full mecanum wiring map, current tuning constants, and the debugging history behind them.
+
 ## Hardware
 
 - Raspberry Pi 4
