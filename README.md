@@ -1,0 +1,54 @@
+# M.5 Final Project — Setup Guide
+
+Raspberry Pi 4 robot: 4-motor drive (2x L298N-style drivers) + YOLO camera detection.
+
+## Hardware
+
+- Raspberry Pi 4
+- 2x motor driver boards (L298N-style), one for each side
+- 4x DC motors (2 left, 2 right)
+- Push button (start button)
+- HC-SR04 ultrasonic distance sensor
+- USB webcam
+- Battery pack
+
+Orientation: battery = North (front), Raspberry Pi = South (back).
+
+## Wiring (BCM pin numbers)
+
+| Signal | BCM Pin | Notes |
+| --- | --- | --- |
+| IN1 | 4  | Right driver |
+| IN2 | 17 | Right driver |
+| IN3 | 27 | Right driver |
+| IN4 | 22 | Right driver |
+| IN5 | 5  | Left driver |
+| IN6 | 6  | Left driver |
+| IN7 | 19 | Left driver |
+| IN8 | 26 | Left driver |
+| ENA | 13 | Right driver enable (PWM) |
+| ENB | 12 | Left driver enable (PWM) |
+| BTN_PIN | 21 | Start button (other leg to GND, internal pull-up) |
+| TRIG | 10 | Ultrasonic trigger (output) |
+| ECHO | 9  | Ultrasonic echo (input) |
+
+## Software setup
+
+1. Flash Raspberry Pi OS and enable SSH/camera as needed.
+2. Install dependencies:
+   ```bash
+   sudo apt update
+   sudo apt install python3-pip python3-opencv
+   pip3 install RPi.GPIO ultralytics
+   ```
+3. Copy this `final/` folder onto the Pi.
+4. Drop your trained weights into `data/best.pt` (and `data/data.yaml` if you plan to retrain).
+
+## Running
+
+- `python3 main.py` — sets up all GPIO pins, waits for the start button, then hands off to the rest of the program.
+- `python3 default_control.py` — WASD keyboard control of the motors over the terminal (W/S drive, A/D turn, space stop, Q quit).
+- `python3 test.py` — runs the YOLO model on the webcam feed (Pi-optimized: smaller inference size, frame skipping).
+- `python3 train.py` — trains a YOLO model from `data/data.yaml` (run on a PC with a GPU, not on the Pi).
+
+Press the start button wired to `BTN_PIN` (BCM 21) to begin.

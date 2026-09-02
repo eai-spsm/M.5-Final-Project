@@ -3,6 +3,7 @@ import sys
 import termios
 import tty
 import select
+import time
 
 # 1. Tell the Pi we are using BCM (GPIO labels), not physical board numbers
 GPIO.setmode(GPIO.BCM)
@@ -25,6 +26,10 @@ IN8 = 26
 ENA = 13  # R
 ENB = 12  # L
 
+# Ultrasonic (HC-SR04)
+TRIG = 10
+ECHO = 9
+
 GPIO.setup(ENA, GPIO.OUT)
 GPIO.setup(ENB, GPIO.OUT)
 GPIO.setup(IN1, GPIO.OUT)
@@ -35,6 +40,9 @@ GPIO.setup(IN5, GPIO.OUT)
 GPIO.setup(IN6, GPIO.OUT)
 GPIO.setup(IN7, GPIO.OUT)
 GPIO.setup(IN8, GPIO.OUT)
+GPIO.setup(TRIG, GPIO.OUT)
+GPIO.setup(ECHO, GPIO.IN)
+GPIO.output(TRIG, GPIO.LOW)
 
 pwm_right = GPIO.PWM(ENA, 1000)
 pwm_left = GPIO.PWM(ENB, 1000)
@@ -42,6 +50,32 @@ pwm_left.start(0)
 pwm_right.start(0)
 
 SPEED = 60  # duty cycle %
+OBSTACLE_CM = 15  # minimum clearance before forward drive is blocked
+
+
+def get_distance():
+    # Returns distance in cm, or None if the sensor timed out
+    try:
+        GPIO.output(TRIG, GPIO.HIGH)
+        time.sleep(0.00001)
+        GPIO.output(TRIG, GPIO.LOW)
+
+        timeout = time.time() + 0.04
+        while GPIO.input(ECHO) == GPIO.LOW:
+            pulse_start = time.time()
+            if pulse_start > timeout:
+                return None
+
+        timeout = time.time() + 0.04
+        while GPIO.input(ECHO) == GPIO.HIGH:
+            pulse_end = time.time()
+            if pulse_end > timeout:
+                return None
+
+        return (pulse_end - pulse_start) * 34300 / 2
+    except Exception as e:
+        print(f"Ultrasonic Read Error: {e}")
+        return None
 
 
 def right_forward():
@@ -94,6 +128,11 @@ def stop_all():
 
 
 def drive_forward():
+    distance = get_distance()
+    if distance is not None and distance < OBSTACLE_CM:
+        print(f"Obstacle at {distance:.1f}cm - forward blocked")
+        stop_all()
+        return
     left_forward()
     right_forward()
     pwm_left.ChangeDutyCycle(SPEED)
