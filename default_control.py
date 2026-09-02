@@ -66,13 +66,13 @@ OBSTACLE_CM = 15  # minimum clearance before forward drive is blocked
 # If W drives diagonally instead of straight, one wheel is physically wired
 # backward. Use the "1"/"2"/"3"/"4" calibration keys to find which one, then
 # flip its flag here.
-WHEEL_INVERT = {"fl": False, "fr": False, "rl": False, "rr": True}
+WHEEL_INVERT = {"fl": False, "fr": True, "rl": False, "rr": False}
 
 # If strafing (A/D) drifts at an angle or spins instead of going straight
 # sideways, the wheels aren't spinning at exactly matched speeds even at the
 # same duty cycle - lower the trim on whichever wheel is "winning" until it
 # cancels out.
-WHEEL_TRIM = {"fl": 1.0, "fr": 0.9, "rl": 0.9, "rr": 1.0}
+WHEEL_TRIM = {"fl": 0.9, "fr": 1.0, "rl": 1.0, "rr": 0.9}
 
 
 def get_distance():
@@ -101,8 +101,9 @@ def get_distance():
 
 
 # Each wheel is driven independently so we can strafe/rotate, not just go left/right.
-# FL = IN3/IN4 (ENB_L), RL = IN1/IN2 (ENA_L), FR = IN7/IN8 (ENB_R), RR = IN5/IN6 (ENA_R)
-# (front/rear determined empirically - strafe only works with the correct diagonal pairing)
+# FL = IN1/IN2 (ENA_L), RL = IN3/IN4 (ENB_L), FR = IN5/IN6 (ENA_R), RR = IN7/IN8 (ENB_R)
+# (confirmed via the 1/2/3/4 calibration keys - key 1 must visibly spin the
+# actual front-left wheel, etc. A previous front/rear swap here was wrong.)
 
 def _wheel(pin_a, pin_b, forward):
     GPIO.output(pin_a, GPIO.LOW if forward else GPIO.HIGH)
@@ -117,8 +118,8 @@ def _wheel_stop(pin_a, pin_b):
 def set_wheels(fl, fr, rl, rr, speed=SPEED):
     # Each arg is 1 (forward), -1 (backward), or 0 (stop)
     wheels = {"fl": fl, "fr": fr, "rl": rl, "rr": rr}
-    pins = {"fl": (IN3, IN4), "fr": (IN7, IN8), "rl": (IN1, IN2), "rr": (IN5, IN6)}
-    pwms = {"fl": pwm_left_b, "fr": pwm_right_b, "rl": pwm_left_a, "rr": pwm_right_a}
+    pins = {"fl": (IN1, IN2), "fr": (IN5, IN6), "rl": (IN3, IN4), "rr": (IN7, IN8)}
+    pwms = {"fl": pwm_left_a, "fr": pwm_right_a, "rl": pwm_left_b, "rr": pwm_right_b}
 
     for name, direction in wheels.items():
         pin_a, pin_b = pins[name]
