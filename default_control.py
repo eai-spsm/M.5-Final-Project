@@ -57,6 +57,10 @@ pwm_right_a.start(0)
 pwm_right_b.start(0)
 
 SPEED = 60  # duty cycle %
+# Strafing runs each board's two channels in opposite directions at once,
+# which on cheap L298N-style boards can couple electrical noise between
+# channels and glitch the H-bridge. Lower speed = lower current/back-EMF.
+STRAFE_SPEED = 40  # duty cycle %
 OBSTACLE_CM = 15  # minimum clearance before forward drive is blocked
 
 # If W drives diagonally instead of straight, one wheel is physically wired
@@ -110,7 +114,7 @@ def _wheel_stop(pin_a, pin_b):
     GPIO.output(pin_b, GPIO.LOW)
 
 
-def set_wheels(fl, fr, rl, rr):
+def set_wheels(fl, fr, rl, rr, speed=SPEED):
     # Each arg is 1 (forward), -1 (backward), or 0 (stop)
     wheels = {"fl": fl, "fr": fr, "rl": rl, "rr": rr}
     pins = {"fl": (IN3, IN4), "fr": (IN7, IN8), "rl": (IN1, IN2), "rr": (IN5, IN6)}
@@ -125,7 +129,7 @@ def set_wheels(fl, fr, rl, rr):
             if WHEEL_INVERT[name]:
                 direction = -direction
             _wheel(pin_a, pin_b, forward=direction > 0)
-            pwms[name].ChangeDutyCycle(SPEED * WHEEL_TRIM[name])
+            pwms[name].ChangeDutyCycle(speed * WHEEL_TRIM[name])
 
 
 def test_wheel(name):
@@ -153,11 +157,11 @@ def drive_backward():
 
 
 def strafe_left():
-    set_wheels(-1, 1, 1, -1)
+    set_wheels(-1, 1, 1, -1, speed=STRAFE_SPEED)
 
 
 def strafe_right():
-    set_wheels(1, -1, -1, 1)
+    set_wheels(1, -1, -1, 1, speed=STRAFE_SPEED)
 
 
 def rotate_left():
