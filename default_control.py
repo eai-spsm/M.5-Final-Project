@@ -60,7 +60,7 @@ SPEED = 60  # duty cycle %
 # Strafing runs each board's two channels in opposite directions at once,
 # which on cheap L298N-style boards can couple electrical noise between
 # channels and glitch the H-bridge. Lower speed = lower current/back-EMF.
-STRAFE_SPEED = 40  # duty cycle %
+STRAFE_SPEED = 55  # duty cycle %
 OBSTACLE_CM = 15  # minimum clearance before forward drive is blocked
 
 # If W drives diagonally instead of straight, one wheel is physically wired
