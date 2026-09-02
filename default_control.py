@@ -10,28 +10,31 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 # Orientation: battery = North (front), Raspberry Pi = South (back)
-#R
+
+# Board 1 - Left side
+ENA_L = 12  # enables IN1/IN2
+ENB_L = 18  # enables IN3/IN4
 IN1 = 4
 IN2 = 17
 IN3 = 27
 IN4 = 22
 
-#L
+# Board 2 - Right side
+ENA_R = 13  # enables IN5/IN6
+ENB_R = 23  # enables IN7/IN8
 IN5 = 5
 IN6 = 6
 IN7 = 19
 IN8 = 26
 
-# ENA
-ENA = 13  # R
-ENB = 12  # L
-
 # Ultrasonic (HC-SR04)
 TRIG = 10
 ECHO = 9
 
-GPIO.setup(ENA, GPIO.OUT)
-GPIO.setup(ENB, GPIO.OUT)
+GPIO.setup(ENA_L, GPIO.OUT)
+GPIO.setup(ENB_L, GPIO.OUT)
+GPIO.setup(ENA_R, GPIO.OUT)
+GPIO.setup(ENB_R, GPIO.OUT)
 GPIO.setup(IN1, GPIO.OUT)
 GPIO.setup(IN2, GPIO.OUT)
 GPIO.setup(IN3, GPIO.OUT)
@@ -44,10 +47,14 @@ GPIO.setup(TRIG, GPIO.OUT)
 GPIO.setup(ECHO, GPIO.IN)
 GPIO.output(TRIG, GPIO.LOW)
 
-pwm_right = GPIO.PWM(ENA, 1000)
-pwm_left = GPIO.PWM(ENB, 1000)
-pwm_left.start(0)
-pwm_right.start(0)
+pwm_left_a = GPIO.PWM(ENA_L, 1000)   # IN1/IN2
+pwm_left_b = GPIO.PWM(ENB_L, 1000)   # IN3/IN4
+pwm_right_a = GPIO.PWM(ENA_R, 1000)  # IN5/IN6
+pwm_right_b = GPIO.PWM(ENB_R, 1000)  # IN7/IN8
+pwm_left_a.start(0)
+pwm_left_b.start(0)
+pwm_right_a.start(0)
+pwm_right_b.start(0)
 
 SPEED = 60  # duty cycle %
 OBSTACLE_CM = 15  # minimum clearance before forward drive is blocked
@@ -78,42 +85,42 @@ def get_distance():
         return None
 
 
-def right_forward():
+def left_forward():
     GPIO.output(IN1, GPIO.HIGH)
     GPIO.output(IN2, GPIO.LOW)
     GPIO.output(IN3, GPIO.HIGH)
     GPIO.output(IN4, GPIO.LOW)
 
 
-def right_backward():
+def left_backward():
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.HIGH)
     GPIO.output(IN3, GPIO.LOW)
     GPIO.output(IN4, GPIO.HIGH)
 
 
-def right_stop():
+def left_stop():
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.LOW)
     GPIO.output(IN3, GPIO.LOW)
     GPIO.output(IN4, GPIO.LOW)
 
 
-def left_forward():
+def right_forward():
     GPIO.output(IN5, GPIO.HIGH)
     GPIO.output(IN6, GPIO.LOW)
     GPIO.output(IN7, GPIO.HIGH)
     GPIO.output(IN8, GPIO.LOW)
 
 
-def left_backward():
+def right_backward():
     GPIO.output(IN5, GPIO.LOW)
     GPIO.output(IN6, GPIO.HIGH)
     GPIO.output(IN7, GPIO.LOW)
     GPIO.output(IN8, GPIO.HIGH)
 
 
-def left_stop():
+def right_stop():
     GPIO.output(IN5, GPIO.LOW)
     GPIO.output(IN6, GPIO.LOW)
     GPIO.output(IN7, GPIO.LOW)
@@ -123,8 +130,20 @@ def left_stop():
 def stop_all():
     left_stop()
     right_stop()
-    pwm_left.ChangeDutyCycle(0)
-    pwm_right.ChangeDutyCycle(0)
+    pwm_left_a.ChangeDutyCycle(0)
+    pwm_left_b.ChangeDutyCycle(0)
+    pwm_right_a.ChangeDutyCycle(0)
+    pwm_right_b.ChangeDutyCycle(0)
+
+
+def set_left_speed(duty):
+    pwm_left_a.ChangeDutyCycle(duty)
+    pwm_left_b.ChangeDutyCycle(duty)
+
+
+def set_right_speed(duty):
+    pwm_right_a.ChangeDutyCycle(duty)
+    pwm_right_b.ChangeDutyCycle(duty)
 
 
 def drive_forward():
@@ -135,29 +154,29 @@ def drive_forward():
         return
     left_forward()
     right_forward()
-    pwm_left.ChangeDutyCycle(SPEED)
-    pwm_right.ChangeDutyCycle(SPEED)
+    set_left_speed(SPEED)
+    set_right_speed(SPEED)
 
 
 def drive_backward():
     left_backward()
     right_backward()
-    pwm_left.ChangeDutyCycle(SPEED)
-    pwm_right.ChangeDutyCycle(SPEED)
+    set_left_speed(SPEED)
+    set_right_speed(SPEED)
 
 
 def turn_left():
     left_backward()
     right_forward()
-    pwm_left.ChangeDutyCycle(SPEED)
-    pwm_right.ChangeDutyCycle(SPEED)
+    set_left_speed(SPEED)
+    set_right_speed(SPEED)
 
 
 def turn_right():
     left_forward()
     right_backward()
-    pwm_left.ChangeDutyCycle(SPEED)
-    pwm_right.ChangeDutyCycle(SPEED)
+    set_left_speed(SPEED)
+    set_right_speed(SPEED)
 
 
 def get_key(timeout=0.1):
@@ -205,8 +224,10 @@ def main():
     finally:
         print("Cleaning up GPIO resources...")
         stop_all()
-        pwm_left.stop()
-        pwm_right.stop()
+        pwm_left_a.stop()
+        pwm_left_b.stop()
+        pwm_right_a.stop()
+        pwm_right_b.stop()
         GPIO.cleanup()
         print("Done!")
 

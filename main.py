@@ -6,22 +6,23 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 
-# Battery is North 
-#R
+# Battery is North
+
+# Board 1 - Left side
+ENA_L = 12  # enables IN1/IN2
+ENB_L = 18  # enables IN3/IN4
 IN1 = 4
 IN2 = 17
 IN3 = 27
 IN4 = 22
 
-#L
+# Board 2 - Right side
+ENA_R = 13  # enables IN5/IN6
+ENB_R = 23  # enables IN7/IN8
 IN5 = 5
 IN6 = 6
 IN7 = 19
 IN8 = 26
-
-#ENA
-ENA = 13 # R
-ENB = 12 # L
 
 # Start button (pulled up, wired to GND when pressed)
 BTN_PIN = 21
@@ -30,8 +31,10 @@ BTN_PIN = 21
 TRIG = 10
 ECHO = 9
 
-GPIO.setup(ENA, GPIO.OUT)
-GPIO.setup(ENB, GPIO.OUT)
+GPIO.setup(ENA_L, GPIO.OUT)
+GPIO.setup(ENB_L, GPIO.OUT)
+GPIO.setup(ENA_R, GPIO.OUT)
+GPIO.setup(ENB_R, GPIO.OUT)
 GPIO.setup(IN1, GPIO.OUT)
 GPIO.setup(IN2, GPIO.OUT)
 GPIO.setup(IN3, GPIO.OUT)

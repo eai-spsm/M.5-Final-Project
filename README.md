@@ -18,16 +18,18 @@ Orientation: battery = North (front), Raspberry Pi = South (back).
 
 | Signal | BCM Pin | Notes |
 | --- | --- | --- |
-| IN1 | 4  | Right driver |
-| IN2 | 17 | Right driver |
-| IN3 | 27 | Right driver |
-| IN4 | 22 | Right driver |
-| IN5 | 5  | Left driver |
-| IN6 | 6  | Left driver |
-| IN7 | 19 | Left driver |
-| IN8 | 26 | Left driver |
-| ENA | 13 | Right driver enable (PWM) |
-| ENB | 12 | Left driver enable (PWM) |
+| IN1 | 4  | Board 1 (Left) |
+| IN2 | 17 | Board 1 (Left) |
+| IN3 | 27 | Board 1 (Left) |
+| IN4 | 22 | Board 1 (Left) |
+| ENA_L | 12 | Board 1 enable A (IN1/IN2, PWM) |
+| ENB_L | 18 | Board 1 enable B (IN3/IN4, PWM) |
+| IN5 | 5  | Board 2 (Right) |
+| IN6 | 6  | Board 2 (Right) |
+| IN7 | 19 | Board 2 (Right) |
+| IN8 | 26 | Board 2 (Right) |
+| ENA_R | 13 | Board 2 enable A (IN5/IN6, PWM) |
+| ENB_R | 23 | Board 2 enable B (IN7/IN8, PWM) |
 | BTN_PIN | 21 | Start button (other leg to GND, internal pull-up) |
 | TRIG | 10 | Ultrasonic trigger (output) |
 | ECHO | 9  | Ultrasonic echo (input) |
