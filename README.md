@@ -49,7 +49,7 @@ Orientation: battery = North (front), Raspberry Pi = South (back).
 ## Running
 
 - `python3 main.py` — sets up all GPIO pins, waits for the start button, then hands off to the rest of the program.
-- `python3 default_control.py` — WASD keyboard control of the motors over the terminal (W/S drive, A/D turn, space stop, Q quit).
+- `python3 default_control.py` — keyboard control of the mecanum drive over the terminal: W/S forward/back, A/D strafe left/right, Q/E rotate left/right, space stop, X quit.
 - `python3 test.py` — runs the YOLO model on the webcam feed (Pi-optimized: smaller inference size, frame skipping).
 - `python3 train.py` — trains a YOLO model from `data/data.yaml` (run on a PC with a GPU, not on the Pi).
 

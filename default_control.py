@@ -85,65 +85,37 @@ def get_distance():
         return None
 
 
-def left_forward():
-    GPIO.output(IN1, GPIO.HIGH)
-    GPIO.output(IN2, GPIO.LOW)
-    GPIO.output(IN3, GPIO.HIGH)
-    GPIO.output(IN4, GPIO.LOW)
+# Each wheel is driven independently so we can strafe/rotate, not just go left/right.
+# FL = IN1/IN2 (ENA_L), RL = IN3/IN4 (ENB_L), FR = IN5/IN6 (ENA_R), RR = IN7/IN8 (ENB_R)
+
+def _wheel(pin_a, pin_b, forward):
+    GPIO.output(pin_a, GPIO.HIGH if forward else GPIO.LOW)
+    GPIO.output(pin_b, GPIO.LOW if forward else GPIO.HIGH)
 
 
-def left_backward():
-    GPIO.output(IN1, GPIO.LOW)
-    GPIO.output(IN2, GPIO.HIGH)
-    GPIO.output(IN3, GPIO.LOW)
-    GPIO.output(IN4, GPIO.HIGH)
+def _wheel_stop(pin_a, pin_b):
+    GPIO.output(pin_a, GPIO.LOW)
+    GPIO.output(pin_b, GPIO.LOW)
 
 
-def left_stop():
-    GPIO.output(IN1, GPIO.LOW)
-    GPIO.output(IN2, GPIO.LOW)
-    GPIO.output(IN3, GPIO.LOW)
-    GPIO.output(IN4, GPIO.LOW)
+def set_wheels(fl, fr, rl, rr):
+    # Each arg is 1 (forward), -1 (backward), or 0 (stop)
+    wheels = {"fl": fl, "fr": fr, "rl": rl, "rr": rr}
+    pins = {"fl": (IN1, IN2), "fr": (IN5, IN6), "rl": (IN3, IN4), "rr": (IN7, IN8)}
+    pwms = {"fl": pwm_left_a, "fr": pwm_right_a, "rl": pwm_left_b, "rr": pwm_right_b}
 
-
-def right_forward():
-    GPIO.output(IN5, GPIO.HIGH)
-    GPIO.output(IN6, GPIO.LOW)
-    GPIO.output(IN7, GPIO.HIGH)
-    GPIO.output(IN8, GPIO.LOW)
-
-
-def right_backward():
-    GPIO.output(IN5, GPIO.LOW)
-    GPIO.output(IN6, GPIO.HIGH)
-    GPIO.output(IN7, GPIO.LOW)
-    GPIO.output(IN8, GPIO.HIGH)
-
-
-def right_stop():
-    GPIO.output(IN5, GPIO.LOW)
-    GPIO.output(IN6, GPIO.LOW)
-    GPIO.output(IN7, GPIO.LOW)
-    GPIO.output(IN8, GPIO.LOW)
+    for name, direction in wheels.items():
+        pin_a, pin_b = pins[name]
+        if direction == 0:
+            _wheel_stop(pin_a, pin_b)
+            pwms[name].ChangeDutyCycle(0)
+        else:
+            _wheel(pin_a, pin_b, forward=direction > 0)
+            pwms[name].ChangeDutyCycle(SPEED)
 
 
 def stop_all():
-    left_stop()
-    right_stop()
-    pwm_left_a.ChangeDutyCycle(0)
-    pwm_left_b.ChangeDutyCycle(0)
-    pwm_right_a.ChangeDutyCycle(0)
-    pwm_right_b.ChangeDutyCycle(0)
-
-
-def set_left_speed(duty):
-    pwm_left_a.ChangeDutyCycle(duty)
-    pwm_left_b.ChangeDutyCycle(duty)
-
-
-def set_right_speed(duty):
-    pwm_right_a.ChangeDutyCycle(duty)
-    pwm_right_b.ChangeDutyCycle(duty)
+    set_wheels(0, 0, 0, 0)
 
 
 def drive_forward():
@@ -152,31 +124,27 @@ def drive_forward():
         print(f"Obstacle at {distance:.1f}cm - forward blocked")
         stop_all()
         return
-    left_forward()
-    right_forward()
-    set_left_speed(SPEED)
-    set_right_speed(SPEED)
+    set_wheels(1, 1, 1, 1)
 
 
 def drive_backward():
-    left_backward()
-    right_backward()
-    set_left_speed(SPEED)
-    set_right_speed(SPEED)
+    set_wheels(-1, -1, -1, -1)
 
 
-def turn_left():
-    left_backward()
-    right_forward()
-    set_left_speed(SPEED)
-    set_right_speed(SPEED)
+def strafe_left():
+    set_wheels(-1, 1, 1, -1)
 
 
-def turn_right():
-    left_forward()
-    right_backward()
-    set_left_speed(SPEED)
-    set_right_speed(SPEED)
+def strafe_right():
+    set_wheels(1, -1, -1, 1)
+
+
+def rotate_left():
+    set_wheels(-1, 1, -1, 1)
+
+
+def rotate_right():
+    set_wheels(1, -1, 1, -1)
 
 
 def get_key(timeout=0.1):
@@ -194,7 +162,7 @@ def get_key(timeout=0.1):
 
 
 def main():
-    print("WASD to drive, SPACE to stop, Q to quit.")
+    print("W/S forward/back, A/D strafe, Q/E rotate, SPACE stop, X to quit.")
     try:
         while True:
             key = get_key(0.1)
@@ -208,15 +176,21 @@ def main():
                 print("Backward")
                 drive_backward()
             elif key == "a":
-                print("Left")
-                turn_left()
+                print("Strafe left")
+                strafe_left()
             elif key == "d":
-                print("Right")
-                turn_right()
+                print("Strafe right")
+                strafe_right()
+            elif key == "q":
+                print("Rotate left")
+                rotate_left()
+            elif key == "e":
+                print("Rotate right")
+                rotate_right()
             elif key == " ":
                 print("Stop")
                 stop_all()
-            elif key == "q":
+            elif key == "x":
                 print("Quitting...")
                 break
     except KeyboardInterrupt:
