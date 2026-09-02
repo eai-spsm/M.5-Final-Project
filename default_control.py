@@ -59,6 +59,11 @@ pwm_right_b.start(0)
 SPEED = 60  # duty cycle %
 OBSTACLE_CM = 15  # minimum clearance before forward drive is blocked
 
+# If W drives diagonally instead of straight, one wheel is physically wired
+# backward. Use the "1"/"2"/"3"/"4" calibration keys to find which one, then
+# flip its flag here.
+WHEEL_INVERT = {"fl": False, "fr": False, "rl": False, "rr": False}
+
 
 def get_distance():
     # Returns distance in cm, or None if the sensor timed out
@@ -110,8 +115,17 @@ def set_wheels(fl, fr, rl, rr):
             _wheel_stop(pin_a, pin_b)
             pwms[name].ChangeDutyCycle(0)
         else:
+            if WHEEL_INVERT[name]:
+                direction = -direction
             _wheel(pin_a, pin_b, forward=direction > 0)
             pwms[name].ChangeDutyCycle(SPEED)
+
+
+def test_wheel(name):
+    # Spins one wheel forward in isolation, for calibrating WHEEL_INVERT
+    directions = {"fl": 0, "fr": 0, "rl": 0, "rr": 0}
+    directions[name] = 1
+    set_wheels(**directions)
 
 
 def stop_all():
@@ -163,6 +177,7 @@ def get_key(timeout=0.1):
 
 def main():
     print("W/S forward/back, A/D strafe, Q/E rotate, SPACE stop, X to quit.")
+    print("1/2/3/4 = spin FL/FR/RL/RR alone, for wiring calibration.")
     try:
         while True:
             key = get_key(0.1)
@@ -187,6 +202,18 @@ def main():
             elif key == "e":
                 print("Rotate right")
                 rotate_right()
+            elif key == "1":
+                print("Testing FL")
+                test_wheel("fl")
+            elif key == "2":
+                print("Testing FR")
+                test_wheel("fr")
+            elif key == "3":
+                print("Testing RL")
+                test_wheel("rl")
+            elif key == "4":
+                print("Testing RR")
+                test_wheel("rr")
             elif key == " ":
                 print("Stop")
                 stop_all()

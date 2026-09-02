@@ -72,7 +72,20 @@ Orientation: battery = North (front), Raspberry Pi = South (back).
 | Q | Rotate left (CCW) |
 | E | Rotate right (CW) |
 | Space | Stop all wheels |
+| 1 | Spin front-left wheel alone (calibration) |
+| 2 | Spin front-right wheel alone (calibration) |
+| 3 | Spin rear-left wheel alone (calibration) |
+| 4 | Spin rear-right wheel alone (calibration) |
 | X | Quit (also cleans up GPIO) |
 | Ctrl+C | Quit (also cleans up GPIO) |
 
 Forward drive auto-blocks and stops if the ultrasonic sensor reads closer than `OBSTACLE_CM` (15cm default).
+
+### Calibrating wheel direction
+
+If W drives diagonally instead of straight, one wheel is physically wired backward (a motor lead or IN1/IN2 pair swapped). Since all four wheels spinning the same rotational direction always gives straight motion for any wheel type, a diagonal drift means one wheel isn't actually going the way the code thinks:
+
+1. Jack the robot up (wheels off the ground) or watch it closely.
+2. Press **1**, **2**, **3**, **4** one at a time to spin FL, FR, RL, RR in isolation.
+3. Every wheel's roller pattern should push the robot generally forward when spun "forward" — find the one that pushes backward instead.
+4. In `default_control.py`, flip that wheel's entry in `WHEEL_INVERT` to `True` and re-test with W.
