@@ -62,7 +62,7 @@ OBSTACLE_CM = 15  # minimum clearance before forward drive is blocked
 # If W drives diagonally instead of straight, one wheel is physically wired
 # backward. Use the "1"/"2"/"3"/"4" calibration keys to find which one, then
 # flip its flag here.
-WHEEL_INVERT = {"fl": False, "fr": False, "rl": False, "rr": False}
+WHEEL_INVERT = {"fl": False, "fr": True, "rl": False, "rr": False}
 
 
 def get_distance():
@@ -94,8 +94,8 @@ def get_distance():
 # FL = IN1/IN2 (ENA_L), RL = IN3/IN4 (ENB_L), FR = IN5/IN6 (ENA_R), RR = IN7/IN8 (ENB_R)
 
 def _wheel(pin_a, pin_b, forward):
-    GPIO.output(pin_a, GPIO.HIGH if forward else GPIO.LOW)
-    GPIO.output(pin_b, GPIO.LOW if forward else GPIO.HIGH)
+    GPIO.output(pin_a, GPIO.LOW if forward else GPIO.HIGH)
+    GPIO.output(pin_b, GPIO.HIGH if forward else GPIO.LOW)
 
 
 def _wheel_stop(pin_a, pin_b):
