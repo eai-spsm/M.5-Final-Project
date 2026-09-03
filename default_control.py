@@ -3,7 +3,7 @@ import termios
 import tty
 import select
 
-from movement import MecanumDrive
+from guidance import GuidedDrive
 
 
 def get_key(timeout=0.1):
@@ -21,9 +21,10 @@ def get_key(timeout=0.1):
 
 
 def main():
-    drive = MecanumDrive()
+    drive = GuidedDrive()
     print("W/S forward/back, A/D strafe, Q/E rotate, SPACE stop, X to quit.")
     print("1/2/3/4 = spin FL/FR/RL/RR alone, for wiring calibration.")
+    print("P = print current position/heading. Starts at (0, 0), heading 0.")
     try:
         while True:
             key = get_key(0.1)
@@ -31,23 +32,23 @@ def main():
                 continue
             key = key.lower()
             if key == "w":
-                print("Forward")
                 drive.forward()
+                print("Forward", drive.pose())
             elif key == "s":
-                print("Backward")
                 drive.backward()
+                print("Backward", drive.pose())
             elif key == "a":
-                print("Strafe left")
                 drive.strafe_left()
+                print("Strafe left", drive.pose())
             elif key == "d":
-                print("Strafe right")
                 drive.strafe_right()
+                print("Strafe right", drive.pose())
             elif key == "q":
-                print("Rotate left")
                 drive.rotate_left()
+                print("Rotate left", drive.pose())
             elif key == "e":
-                print("Rotate right")
                 drive.rotate_right()
+                print("Rotate right", drive.pose())
             elif key == "1":
                 print("Testing FL")
                 drive.test_wheel("fl")
@@ -60,9 +61,11 @@ def main():
             elif key == "4":
                 print("Testing RR")
                 drive.test_wheel("rr")
+            elif key == "p":
+                print("Position:", drive.pose())
             elif key == " ":
-                print("Stop")
                 drive.stop()
+                print("Stop", drive.pose())
             elif key == "x":
                 print("Quitting...")
                 break

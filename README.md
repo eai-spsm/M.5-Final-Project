@@ -57,6 +57,9 @@ final/
 ├── movement/
 │   ├── __init__.py
 │   └── movement.py       # MecanumDrive class - all motor/GPIO logic lives here
+├── guidance/
+│   ├── navigator.py       # Navigator - dead-reckoning (x, y, heading) estimate
+│   └── guided_drive.py    # GuidedDrive - MecanumDrive + Navigator combined
 ├── perception/
 │   ├── test.py            # YOLO detection on the webcam feed
 │   ├── train.py           # trains a YOLO model (run on a PC with a GPU)
@@ -67,8 +70,9 @@ final/
 ```
 
 - **`movement/`** — the `MecanumDrive` class: all motor pin setup, calibration constants (`WHEEL_INVERT`, `WHEEL_TRIM`, speeds), and movement methods (`forward`, `backward`, `strafe_left/right`, `rotate_left/right`, `stop`, `test_wheel`, `get_distance`). Every movement method takes an optional `speed=` to override the default duty cycle for that call. Import with `from movement import MecanumDrive` from anything that needs to drive the robot — keyboard control, autonomous ball-chasing logic, etc. — instead of duplicating motor code.
-- **`default_control.py`** — keyboard control: reads WASD/etc. from the terminal and calls into `MecanumDrive`. No motor logic of its own.
-- **`main.py`** — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive` here for the autonomous match code).
+- **`guidance/`** — position/heading tracking. `Navigator` is pure dead-reckoning math (no GPIO, works starts at `(0, 0)` facing heading `0`, X = right of start, Y = ahead of start, heading in degrees clockwise). `GuidedDrive` wraps `MecanumDrive` + `Navigator` so calling a movement method (`forward()`, `rotate_right()`, etc.) both drives the motors and updates the estimated pose — call `.pose()` any time to get `(x_cm, y_cm, heading_deg)`. **No wheel encoders on this robot**, so this is open-loop and will drift over time (wheel slip, uneven floor, the speed constants being approximate) — good for "roughly where am I", not precision navigation. See the calibration note in `guidance/guided_drive.py` for measuring the real speed constants.
+- **`default_control.py`** — keyboard control: reads WASD/etc. from the terminal and calls into `GuidedDrive`, printing the tracked position after every move. No motor logic of its own.
+- **`main.py`** — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive`/`GuidedDrive` here for the autonomous match code).
 - **`perception/`** — camera/YOLO code: `test.py` runs detection on the webcam feed (Pi-optimized: smaller inference size, frame skipping), `train.py` trains a model from `perception/data/data.yaml`.
 - **`docs/`** — the calibration report and the competition rules.
 
@@ -102,6 +106,7 @@ final/
 | 2 | Spin front-right wheel alone (calibration) |
 | 3 | Spin rear-left wheel alone (calibration) |
 | 4 | Spin rear-right wheel alone (calibration) |
+| P | Print current tracked position/heading |
 | X | Quit (also cleans up GPIO) |
 | Ctrl+C | Quit (also cleans up GPIO) |
 

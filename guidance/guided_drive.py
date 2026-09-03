@@ -1,0 +1,60 @@
+from movement import MecanumDrive
+
+from .navigator import Navigator
+
+# PLACEHOLDER speed constants - measure these on the real robot and update.
+# How to calibrate: drive forward for a fixed time (e.g. 3s) at the default
+# speed, measure the distance traveled with a tape measure, divide by time
+# for LINEAR_SPEED_CM_S. Same idea for STRAFE_SPEED_CM_S (strafe instead of
+# forward) and ROTATE_SPEED_DEG_S (rotate for a fixed time, measure the
+# angle turned with a protractor/known angle mark instead of distance).
+LINEAR_SPEED_CM_S = 20.0
+STRAFE_SPEED_CM_S = 15.0
+ROTATE_SPEED_DEG_S = 90.0
+
+
+class GuidedDrive:
+    """MecanumDrive + Navigator: driving the robot also tracks its
+    estimated position/heading, starting at (0, 0) facing heading 0.
+    """
+
+    def __init__(self):
+        self.drive = MecanumDrive()
+        self.nav = Navigator()
+
+    def forward(self, speed=None):
+        self.drive.forward(speed=speed)
+        self.nav.set_velocity(vy=LINEAR_SPEED_CM_S)
+
+    def backward(self, speed=None):
+        self.drive.backward(speed=speed)
+        self.nav.set_velocity(vy=-LINEAR_SPEED_CM_S)
+
+    def strafe_left(self, speed=None):
+        self.drive.strafe_left(speed=speed)
+        self.nav.set_velocity(vx=-STRAFE_SPEED_CM_S)
+
+    def strafe_right(self, speed=None):
+        self.drive.strafe_right(speed=speed)
+        self.nav.set_velocity(vx=STRAFE_SPEED_CM_S)
+
+    def rotate_left(self, speed=None):
+        self.drive.rotate_left(speed=speed)
+        self.nav.set_velocity(omega=-ROTATE_SPEED_DEG_S)
+
+    def rotate_right(self, speed=None):
+        self.drive.rotate_right(speed=speed)
+        self.nav.set_velocity(omega=ROTATE_SPEED_DEG_S)
+
+    def stop(self):
+        self.drive.stop()
+        self.nav.set_velocity(0, 0, 0)
+
+    def test_wheel(self, name):
+        self.drive.test_wheel(name)
+
+    def pose(self):
+        return self.nav.pose()
+
+    def cleanup(self):
+        self.drive.cleanup()
