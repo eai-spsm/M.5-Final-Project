@@ -25,6 +25,7 @@ def main():
     print("W/S forward/back, A/D strafe, Q/E rotate, SPACE stop, X to quit.")
     print("1/2/3/4 = spin FL/FR/RL/RR alone, for wiring calibration.")
     print("P = print current position/heading. Starts at (0, 0), heading 0.")
+    print("B = about-face (rotate 180 from current heading).")
     try:
         while True:
             key = get_key(0.1)
@@ -62,6 +63,11 @@ def main():
                 print("Testing RR")
                 drive.test_wheel("rr")
             elif key == "p":
+                print("Position:", drive.pose())
+            elif key == "b":
+                target = (drive.pose()[2] + 180) % 360
+                print(f"About-face -> target heading {target:.0f}")
+                drive.rotate_to(target)
                 print("Position:", drive.pose())
             elif key == " ":
                 drive.stop()

@@ -1,3 +1,5 @@
+import time
+
 from movement import MecanumDrive
 
 from .navigator import Navigator
@@ -49,6 +51,26 @@ class GuidedDrive:
     def stop(self):
         self.drive.stop()
         self.nav.set_velocity(0, 0, 0)
+
+    def rotate_to(self, target_heading_deg, speed=None, tolerance_deg=5, timeout=5.0):
+        # Rotates toward target_heading_deg (0-360, clockwise, same
+        # convention as Navigator) the short way, blocking until within
+        # tolerance_deg or timeout seconds pass. Open-loop like everything
+        # else here - relies on the same ROTATE_SPEED_DEG_S estimate, so it
+        # can overshoot; the timeout is a safety net against never
+        # converging, not a normal way for this to end.
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            _, _, heading = self.pose()
+            diff = (target_heading_deg - heading + 180) % 360 - 180  # -180..180
+            if abs(diff) <= tolerance_deg:
+                break
+            if diff > 0:
+                self.rotate_right(speed=speed)
+            else:
+                self.rotate_left(speed=speed)
+            time.sleep(0.05)
+        self.stop()
 
     def test_wheel(self, name):
         self.drive.test_wheel(name)

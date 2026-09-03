@@ -107,6 +107,7 @@ final/
 | 3 | Spin rear-left wheel alone (calibration) |
 | 4 | Spin rear-right wheel alone (calibration) |
 | P | Print current tracked position/heading |
+| B | About-face (rotate 180° from current heading) |
 | X | Quit (also cleans up GPIO) |
 | Ctrl+C | Quit (also cleans up GPIO) |
 
