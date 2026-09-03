@@ -1,29 +1,47 @@
 import http.server
 import socketserver
 import threading
+import time
 
 import cv2
 
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 480
+# Kept low since this is streamed over an SSH tunnel (VS Code Remote-SSH /
+# Simple Browser) - a smaller, lower-quality, lower-FPS stream is much less
+# laggy than a big high-quality one over that kind of link.
+FRAME_WIDTH = 320
+FRAME_HEIGHT = 240
+JPEG_QUALITY = 60      # 0-100, lower = smaller/faster, blockier
+TARGET_FPS = 12
 PORT = 8080
 
-# Latest frame, shared between the capture thread and any number of viewers
+# Latest frame + a version counter, shared between the capture thread and
+# any number of viewers. Viewers wait on _new_frame instead of polling, so
+# they only ever send an actually-new frame - no duplicate resends.
 _latest_jpeg = None
+_frame_id = 0
 _lock = threading.Lock()
+_new_frame = threading.Condition(_lock)
 
 
 def capture_loop(cap):
-    global _latest_jpeg
+    global _latest_jpeg, _frame_id
+    frame_interval = 1.0 / TARGET_FPS
     while True:
+        start = time.time()
         ret, frame = cap.read()
         if not ret:
             continue
-        ok, jpg = cv2.imencode(".jpg", frame)
+        ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
         if not ok:
             continue
-        with _lock:
+        with _new_frame:
             _latest_jpeg = jpg.tobytes()
+            _frame_id += 1
+            _new_frame.notify_all()
+
+        elapsed = time.time() - start
+        if elapsed < frame_interval:
+            time.sleep(frame_interval - elapsed)
 
 
 class StreamingHandler(http.server.BaseHTTPRequestHandler):
@@ -46,12 +64,15 @@ class StreamingHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=FRAME")
             self.end_headers()
+            last_sent_id = None
             try:
                 while True:
-                    with _lock:
+                    with _new_frame:
+                        while _frame_id == last_sent_id or _latest_jpeg is None:
+                            _new_frame.wait()
                         jpg = _latest_jpeg
-                    if jpg is None:
-                        continue
+                        last_sent_id = _frame_id
+
                     self.wfile.write(b"--FRAME\r\n")
                     self.send_header("Content-Type", "image/jpeg")
                     self.send_header("Content-Length", str(len(jpg)))
@@ -79,7 +100,7 @@ def main():
 
     with socketserver.ThreadingTCPServer(("0.0.0.0", PORT), StreamingHandler) as server:
         print(f"Live view at http://<pi-ip-address>:{PORT}/  (Ctrl+C to stop)")
-        print("In VS Code: Ctrl+Shift+P -> 'Simple Browser: Show' -> paste that URL.")
+        print("In VS Code: Ctrl+Shift+P -> 'Browser: Open Integrated Browser' -> paste that URL.")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
