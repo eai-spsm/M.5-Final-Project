@@ -54,6 +54,7 @@ Orientation: battery = North (front), Raspberry Pi = South (back).
 final/
 ├── main.py              # entry point: start button -> hands off to match logic
 ├── default_control.py   # keyboard control (testing/manual driving)
+├── cam_control.py        # live camera view over HTTP (no HDMI needed)
 ├── movement/
 │   ├── __init__.py
 │   └── movement.py       # MecanumDrive class - all motor/GPIO logic lives here
@@ -72,6 +73,7 @@ final/
 - **`movement/`** — the `MecanumDrive` class: all motor pin setup, calibration constants (`WHEEL_INVERT`, `WHEEL_TRIM`, speeds), and movement methods (`forward`, `backward`, `strafe_left/right`, `rotate_left/right`, `stop`, `test_wheel`, `get_distance`). Every movement method takes an optional `speed=` to override the default duty cycle for that call. Import with `from movement import MecanumDrive` from anything that needs to drive the robot — keyboard control, autonomous ball-chasing logic, etc. — instead of duplicating motor code.
 - **`guidance/`** — position/heading tracking. `Navigator` is pure dead-reckoning math (no GPIO, works starts at `(0, 0)` facing heading `0`, X = right of start, Y = ahead of start, heading in degrees clockwise). `GuidedDrive` wraps `MecanumDrive` + `Navigator` so calling a movement method (`forward()`, `rotate_right()`, etc.) both drives the motors and updates the estimated pose — call `.pose()` any time to get `(x_cm, y_cm, heading_deg)`. **No wheel encoders on this robot**, so this is open-loop and will drift over time (wheel slip, uneven floor, the speed constants being approximate) — good for "roughly where am I", not precision navigation. See the calibration note in `guidance/guided_drive.py` for measuring the real speed constants.
 - **`default_control.py`** — keyboard control: reads WASD/etc. from the terminal and calls into `GuidedDrive`, printing the tracked position after every move. No motor logic of its own.
+- **`cam_control.py`** — live camera view. Since there's no HDMI monitor on the Pi, `cv2.imshow()` (a desktop window) won't work — this instead serves the webcam as an MJPEG stream over HTTP, viewable from a browser anywhere on the same network, including VS Code's own Simple Browser. See "Viewing the camera" below.
 - **`main.py`** — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive`/`GuidedDrive` here for the autonomous match code).
 - **`perception/`** — camera/YOLO code: `test.py` runs detection on the webcam feed (Pi-optimized: smaller inference size, frame skipping), `train.py` trains a model from `perception/data/data.yaml`.
 - **`docs/`** — the calibration report and the competition rules.
@@ -80,8 +82,18 @@ final/
 
 - `python3 main.py`
 - `python3 default_control.py`
+- `python3 cam_control.py`
 - `python3 perception/test.py`
 - `python3 perception/train.py`
+
+## Viewing the camera (no HDMI)
+
+1. On the Pi: `python3 cam_control.py` — it prints a URL like `http://<pi-ip-address>:8080/`. Find the Pi's actual IP with `hostname -I` if you don't already have it (it's whatever address you SSH to).
+2. In VS Code (connected to the Pi over Remote-SSH): press `Ctrl+Shift+P` (or `Cmd+Shift+P`), run **"Simple Browser: Show"**, and paste that URL (with the Pi's real IP, not `<pi-ip-address>`) — the live feed opens in a tab inside VS Code, no HDMI or extra software needed.
+   - Alternatively just open that URL in any regular browser on a device on the same network (phone, laptop).
+3. Ctrl+C on the Pi to stop the stream.
+
+This is view-only — it doesn't run any detection, just shows the raw feed for aiming the camera, checking focus/exposure, etc.
 
 ## Controls
 
