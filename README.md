@@ -93,6 +93,8 @@ final/
 
 ### Keyboard (`default_control.py`)
 
+The current tracked position/heading is always shown live on one updating status line — no key needed to see it.
+
 | Key | Action |
 | --- | --- |
 | W | Drive forward |
@@ -106,7 +108,6 @@ final/
 | 2 | Spin front-right wheel alone (calibration) |
 | 3 | Spin rear-left wheel alone (calibration) |
 | 4 | Spin rear-right wheel alone (calibration) |
-| P | Print current tracked position/heading |
 | B | About-face (rotate 180° from current heading) |
 | R | Reset tracked position to (0, 0), heading 0 |
 | + / - | Adjust speed by 5 (clamped 20-100) |

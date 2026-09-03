@@ -20,76 +20,78 @@ def get_key(timeout=0.1):
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
+def print_status(action, drive):
+    x, y, heading = drive.pose()
+    print(f"\r{action:<14} x={x:7.1f}cm y={y:7.1f}cm heading={heading:5.1f}°   ", end="", flush=True)
+
+
 def main():
     drive = GuidedDrive()
     print("W/S forward/back, A/D strafe, Q/E rotate, SPACE stop, X to quit.")
     print("1/2/3/4 = spin FL/FR/RL/RR alone, for wiring calibration.")
-    print("P = print current position/heading. Starts at (0, 0), heading 0.")
     print("B = about-face (rotate 180 from current heading).")
     print("R = reset tracked position to (0, 0), heading 0.")
     print("+/- = adjust speed.")
+    action = "Ready"
     try:
         while True:
             key = get_key(0.1)
-            if key is None:
-                continue
-            key = key.lower()
-            if key == "w":
-                drive.forward()
-                print("Forward", drive.pose())
-            elif key == "s":
-                drive.backward()
-                print("Backward", drive.pose())
-            elif key == "a":
-                drive.strafe_left()
-                print("Strafe left", drive.pose())
-            elif key == "d":
-                drive.strafe_right()
-                print("Strafe right", drive.pose())
-            elif key == "q":
-                drive.rotate_left()
-                print("Rotate left", drive.pose())
-            elif key == "e":
-                drive.rotate_right()
-                print("Rotate right", drive.pose())
-            elif key == "1":
-                print("Testing FL")
-                drive.test_wheel("fl")
-            elif key == "2":
-                print("Testing FR")
-                drive.test_wheel("fr")
-            elif key == "3":
-                print("Testing RL")
-                drive.test_wheel("rl")
-            elif key == "4":
-                print("Testing RR")
-                drive.test_wheel("rr")
-            elif key == "p":
-                print("Position:", drive.pose())
-            elif key == "b":
-                target = (drive.pose()[2] + 180) % 360
-                print(f"About-face -> target heading {target:.0f}")
-                drive.rotate_to(target)
-                print("Position:", drive.pose())
-            elif key == "r":
-                drive.reset_position()
-                print("Position reset:", drive.pose())
-            elif key in ("+", "="):
-                speed, strafe_speed = drive.adjust_speed(5)
-                print(f"Speed: {speed:.0f}  Strafe speed: {strafe_speed:.0f}")
-            elif key == "-":
-                speed, strafe_speed = drive.adjust_speed(-5)
-                print(f"Speed: {speed:.0f}  Strafe speed: {strafe_speed:.0f}")
-            elif key == " ":
-                drive.stop()
-                print("Stop", drive.pose())
-            elif key == "x":
-                print("Quitting...")
-                break
+            if key is not None:
+                key = key.lower()
+                if key == "w":
+                    drive.forward()
+                    action = "Forward"
+                elif key == "s":
+                    drive.backward()
+                    action = "Backward"
+                elif key == "a":
+                    drive.strafe_left()
+                    action = "Strafe left"
+                elif key == "d":
+                    drive.strafe_right()
+                    action = "Strafe right"
+                elif key == "q":
+                    drive.rotate_left()
+                    action = "Rotate left"
+                elif key == "e":
+                    drive.rotate_right()
+                    action = "Rotate right"
+                elif key == "1":
+                    drive.test_wheel("fl")
+                    action = "Testing FL"
+                elif key == "2":
+                    drive.test_wheel("fr")
+                    action = "Testing FR"
+                elif key == "3":
+                    drive.test_wheel("rl")
+                    action = "Testing RL"
+                elif key == "4":
+                    drive.test_wheel("rr")
+                    action = "Testing RR"
+                elif key == "b":
+                    target = (drive.pose()[2] + 180) % 360
+                    drive.rotate_to(target)
+                    action = "About-face"
+                elif key == "r":
+                    drive.reset_position()
+                    action = "Position reset"
+                elif key in ("+", "="):
+                    speed, strafe_speed = drive.adjust_speed(5)
+                    action = f"Speed {speed:.0f}/{strafe_speed:.0f}"
+                elif key == "-":
+                    speed, strafe_speed = drive.adjust_speed(-5)
+                    action = f"Speed {speed:.0f}/{strafe_speed:.0f}"
+                elif key == " ":
+                    drive.stop()
+                    action = "Stop"
+                elif key == "x":
+                    print("\nQuitting...")
+                    break
+            print_status(action, drive)
     except KeyboardInterrupt:
         print("\nProgram stopped by user.")
     finally:
-        print("Cleaning up GPIO resources...")
+        print("\nCleaning up GPIO resources...")
         drive.cleanup()
         print("Done!")
 
