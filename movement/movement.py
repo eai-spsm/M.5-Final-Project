@@ -130,11 +130,8 @@ class MecanumDrive:
         self.set_wheels(0, 0, 0, 0)
 
     def forward(self, speed=None):
-        distance = self.get_distance()
-        if distance is not None and distance < OBSTACLE_CM:
-            print(f"Obstacle at {distance:.1f}cm - forward blocked")
-            self.stop()
-            return
+        # Ultrasonic obstacle check disabled for now - see get_distance()
+        # if you want to re-enable a distance gate here.
         self.set_wheels(1, 1, 1, 1, speed=speed)
 
     def backward(self, speed=None):

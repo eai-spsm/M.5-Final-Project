@@ -115,7 +115,7 @@ The current tracked position/heading is always shown live on one updating status
 | X | Quit (also cleans up GPIO) |
 | Ctrl+C | Quit (also cleans up GPIO) |
 
-Forward drive auto-blocks and stops if the ultrasonic sensor reads closer than `OBSTACLE_CM` (15cm default).
+The ultrasonic obstacle check on forward drive is currently disabled (see `MecanumDrive.forward()` in `movement/movement.py`) — `get_distance()` still works if you want to re-enable it.
 
 ### Calibrating wheel direction
 
