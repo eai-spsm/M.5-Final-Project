@@ -111,6 +111,7 @@ The current tracked position/heading is always shown live on one updating status
 | B | About-face (rotate 180° from current heading) |
 | R | Reset tracked position to (0, 0), heading 0 |
 | + / - | Adjust speed by 5 (clamped 20-100) |
+| H | HALT — stops and locks out every other key until H is pressed again (X still works) |
 | X | Quit (also cleans up GPIO) |
 | Ctrl+C | Quit (also cleans up GPIO) |
 

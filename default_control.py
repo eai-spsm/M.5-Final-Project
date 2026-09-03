@@ -32,13 +32,24 @@ def main():
     print("B = about-face (rotate 180 from current heading).")
     print("R = reset tracked position to (0, 0), heading 0.")
     print("+/- = adjust speed.")
+    print("H = HALT (locks out other keys until H is pressed again).")
     action = "Ready"
+    halted = False
     try:
         while True:
             key = get_key(0.1)
             if key is not None:
                 key = key.lower()
-                if key == "w":
+                if key == "h":
+                    halted = not halted
+                    drive.stop()
+                    action = "HALTED (press H to resume)" if halted else "Resumed"
+                elif key == "x":
+                    print("\nQuitting...")
+                    break
+                elif halted:
+                    pass  # ignore every other key while halted
+                elif key == "w":
                     drive.forward()
                     action = "Forward"
                 elif key == "s":
@@ -84,9 +95,6 @@ def main():
                 elif key == " ":
                     drive.stop()
                     action = "Stop"
-                elif key == "x":
-                    print("\nQuitting...")
-                    break
             print_status(action, drive)
     except KeyboardInterrupt:
         print("\nProgram stopped by user.")
