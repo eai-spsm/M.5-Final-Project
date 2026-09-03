@@ -108,6 +108,8 @@ final/
 | 4 | Spin rear-right wheel alone (calibration) |
 | P | Print current tracked position/heading |
 | B | About-face (rotate 180° from current heading) |
+| R | Reset tracked position to (0, 0), heading 0 |
+| + / - | Adjust speed by 5 (clamped 20-100) |
 | X | Quit (also cleans up GPIO) |
 | Ctrl+C | Quit (also cleans up GPIO) |
 

@@ -26,6 +26,8 @@ def main():
     print("1/2/3/4 = spin FL/FR/RL/RR alone, for wiring calibration.")
     print("P = print current position/heading. Starts at (0, 0), heading 0.")
     print("B = about-face (rotate 180 from current heading).")
+    print("R = reset tracked position to (0, 0), heading 0.")
+    print("+/- = adjust speed.")
     try:
         while True:
             key = get_key(0.1)
@@ -69,6 +71,15 @@ def main():
                 print(f"About-face -> target heading {target:.0f}")
                 drive.rotate_to(target)
                 print("Position:", drive.pose())
+            elif key == "r":
+                drive.reset_position()
+                print("Position reset:", drive.pose())
+            elif key in ("+", "="):
+                speed, strafe_speed = drive.adjust_speed(5)
+                print(f"Speed: {speed:.0f}  Strafe speed: {strafe_speed:.0f}")
+            elif key == "-":
+                speed, strafe_speed = drive.adjust_speed(-5)
+                print(f"Speed: {speed:.0f}  Strafe speed: {strafe_speed:.0f}")
             elif key == " ":
                 drive.stop()
                 print("Stop", drive.pose())
