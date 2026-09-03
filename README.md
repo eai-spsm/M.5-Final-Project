@@ -93,7 +93,7 @@ final/
 
 ### Keyboard (`default_control.py`)
 
-The current tracked position/heading is always shown live on one updating status line — no key needed to see it.
+The current tracked position/heading is always shown live on one updating status line — no key needed to see it. A drive timer also starts automatically on the first movement command (W/S/A/D/Q/E/B), pauses while HALTed, resumes when un-HALTed, and stops for good on quit (X or Ctrl+C) — total drive time is printed on exit.
 
 | Key | Action |
 | --- | --- |
