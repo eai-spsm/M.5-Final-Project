@@ -73,9 +73,9 @@ final/
 - **`movement/`** — the `MecanumDrive` class: all motor pin setup, calibration constants (`WHEEL_INVERT`, `WHEEL_TRIM`, speeds), and movement methods (`forward`, `backward`, `strafe_left/right`, `rotate_left/right`, `stop`, `test_wheel`, `get_distance`). Every movement method takes an optional `speed=` to override the default duty cycle for that call. Import with `from movement import MecanumDrive` from anything that needs to drive the robot — keyboard control, autonomous ball-chasing logic, etc. — instead of duplicating motor code.
 - **`guidance/`** — position/heading tracking. `Navigator` is pure dead-reckoning math (no GPIO, works starts at `(0, 0)` facing heading `0`, X = right of start, Y = ahead of start, heading in degrees clockwise). `GuidedDrive` wraps `MecanumDrive` + `Navigator` so calling a movement method (`forward()`, `rotate_right()`, etc.) both drives the motors and updates the estimated pose — call `.pose()` any time to get `(x_cm, y_cm, heading_deg)`. **No wheel encoders on this robot**, so this is open-loop and will drift over time (wheel slip, uneven floor, the speed constants being approximate) — good for "roughly where am I", not precision navigation. See the calibration note in `guidance/guided_drive.py` for measuring the real speed constants.
 - **`default_control.py`** — keyboard control: reads WASD/etc. from the terminal and calls into `GuidedDrive`, printing the tracked position after every move. No motor logic of its own.
-- **`cam_control.py`** — live camera view. Since there's no HDMI monitor on the Pi, `cv2.imshow()` (a desktop window) won't work — this instead serves the webcam as an MJPEG stream over HTTP, viewable from a browser anywhere on the same network, including VS Code's own Simple Browser. See "Viewing the camera" below.
+- **`cam_control.py`** — live camera view, and the only thing that actually opens the webcam (one process can hold it open at a time, so this is the single source for every view rather than each perception script grabbing its own capture). Since there's no HDMI monitor on the Pi, `cv2.imshow()` (a desktop window) won't work — this instead serves color, grayscale, and the `perception/color_segment.py` debug view as MJPEG streams over HTTP, viewable from a browser anywhere on the same network, including VS Code's own Simple Browser. See "Viewing the camera" below.
 - **`main.py`** — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive`/`GuidedDrive` here for the autonomous match code).
-- **`perception/`** — camera code: `test.py` runs YOLO detection on the webcam feed (Pi-optimized: smaller inference size, frame skipping), `train.py` trains a model from `perception/data/data.yaml`. `color_segment.py` is a color-based approach for the ball (bright green in testing — not the orange/yellow the rulebook describes, so its HSV range is calibrated against the real ball, not the rules), wall (black), and floor (gray) using HSV masks + bitwise ops, with a debug MJPEG view (same no-HDMI pattern as `cam_control.py`) split into ball detection / ball cut-out / wall cut-out / floor cut-out quadrants.
+- **`perception/`** — camera code: `test.py` runs YOLO detection on the webcam feed (Pi-optimized: smaller inference size, frame skipping), `train.py` trains a model from `perception/data/data.yaml`. `color_segment.py` is a color-based approach for the ball (bright green in testing — not the orange/yellow the rulebook describes, so its HSV range is calibrated against the real ball, not the rules), wall (black), and floor (gray) using HSV masks + bitwise ops — logic only, no camera/server of its own; its debug view is served by `cam_control.py` (see below) since only one process can hold the webcam open at a time.
 - **`docs/`** — the calibration report and the competition rules.
 
 ## Running
@@ -85,7 +85,6 @@ final/
 - `python3 cam_control.py`
 - `python3 perception/test.py`
 - `python3 perception/train.py`
-- `python3 perception/color_segment.py` — debug view at `http://<pi-ip-address>:8081/` (port differs from `cam_control.py`'s 8080 so both can run at once)
 
 ## Viewing the camera (no HDMI)
 
@@ -94,9 +93,9 @@ final/
    - Alternatively just open that URL in any regular browser on a device on the same network (phone, laptop).
 3. Ctrl+C on the Pi to stop the stream.
 
-The page shows both a color and a grayscale feed side by side (`/stream` and `/stream_gray`), useful for previewing what a grayscale-based detector (e.g. the black wall/tape) would actually see.
+The page shows three feeds: color and grayscale side by side (`/stream`, `/stream_gray`) — useful for previewing what a grayscale-based detector (e.g. the black wall/tape) would actually see — plus the `perception/color_segment.py` ball/wall/floor segmentation debug view (`/stream_segment`) below them, for tuning its HSV ranges.
 
-This is view-only — it doesn't run any detection, just shows the raw feed for aiming the camera, checking focus/exposure, etc.
+The color/grayscale feeds are view-only. The segmentation view does run real detection logic (`get_masks`/`ball_center` from `perception/color_segment.py`) so you can see it working live, but `cam_control.py` itself doesn't act on it — it's for aiming the camera and tuning HSV ranges, not the autonomous match code.
 
 ## Controls
 

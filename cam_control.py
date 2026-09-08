@@ -6,6 +6,8 @@ import time
 
 import cv2
 
+from perception import build_debug_view
+
 # Kept low since this is streamed over an SSH tunnel (VS Code Remote-SSH /
 # Simple Browser) - a smaller, lower-quality, lower-FPS stream is much less
 # laggy than a big high-quality one over that kind of link.
@@ -15,19 +17,22 @@ JPEG_QUALITY = 60      # 0-100, lower = smaller/faster, blockier
 TARGET_FPS = 12
 PORT = 8080
 
-# Latest frame (color + grayscale) + a version counter, shared between the
-# capture thread and any number of viewers. Viewers wait on _new_frame
-# instead of polling, so they only ever send an actually-new frame - no
-# duplicate resends.
+# Latest frame (color + grayscale + segmentation debug) + a version
+# counter, shared between the capture thread and any number of viewers.
+# One cv2.VideoCapture read per cycle feeds all three views, since most
+# webcams only allow one process to hold the device open at a time -
+# running cam_control.py and a separate segmentation script at once would
+# fight over the camera instead of sharing it.
 _latest_color = None
 _latest_gray = None
+_latest_segment = None
 _frame_id = 0
 _lock = threading.Lock()
 _new_frame = threading.Condition(_lock)
 
 
 def capture_loop(cap):
-    global _latest_color, _latest_gray, _frame_id
+    global _latest_color, _latest_gray, _latest_segment, _frame_id
     frame_interval = 1.0 / TARGET_FPS
     encode_params = [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
     while True:
@@ -39,12 +44,14 @@ def capture_loop(cap):
         ok_c, jpg_color = cv2.imencode(".jpg", frame, encode_params)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         ok_g, jpg_gray = cv2.imencode(".jpg", gray, encode_params)
-        if not (ok_c and ok_g):
+        ok_s, jpg_segment = cv2.imencode(".jpg", build_debug_view(frame), encode_params)
+        if not (ok_c and ok_g and ok_s):
             continue
 
         with _new_frame:
             _latest_color = jpg_color.tobytes()
             _latest_gray = jpg_gray.tobytes()
+            _latest_segment = jpg_segment.tobytes()
             _frame_id += 1
             _new_frame.notify_all()
 
@@ -85,6 +92,11 @@ class StreamingHandler(http.server.BaseHTTPRequestHandler):
                 b"<img src='/stream' style='width:100%;display:block' /></div>"
                 b"<div><p style='color:#aaa;font:12px sans-serif;margin:4px'>Grayscale</p>"
                 b"<img src='/stream_gray' style='width:100%;display:block' /></div>"
+                b"<div style='flex-basis:100%'>"
+                b"<p style='color:#aaa;font:12px sans-serif;margin:4px'>"
+                b"Segmentation debug - top-left: ball detection | top-right: ball cut-out | "
+                b"bottom-left: wall cut-out | bottom-right: floor cut-out</p>"
+                b"<img src='/stream_segment' style='width:100%;display:block' /></div>"
                 b"</body></html>"
             )
             self.send_response(200)
@@ -92,16 +104,20 @@ class StreamingHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path in ("/stream", "/stream_gray"):
+        elif self.path in ("/stream", "/stream_gray", "/stream_segment"):
             self.send_response(200)
             self.send_header("Age", "0")
             self.send_header("Cache-Control", "no-cache, private")
             self.send_header("Pragma", "no-cache")
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=FRAME")
             self.end_headers()
-            get_jpeg = (lambda: _latest_color) if self.path == "/stream" else (lambda: _latest_gray)
+            getters = {
+                "/stream": lambda: _latest_color,
+                "/stream_gray": lambda: _latest_gray,
+                "/stream_segment": lambda: _latest_segment,
+            }
             try:
-                _stream(self.wfile, get_jpeg)
+                _stream(self.wfile, getters[self.path])
             except (BrokenPipeError, ConnectionResetError):
                 pass  # viewer closed the tab/connection
         else:
