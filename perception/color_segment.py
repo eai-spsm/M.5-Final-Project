@@ -8,10 +8,10 @@ import numpy as np
 BALL_LOW = np.array([35, 80, 60])     # bright green ball
 BALL_HIGH = np.array([85, 255, 255])
 
-WALL_LOW = np.array([0, 0, 0])        # black wall / forbidden-zone tape
-WALL_HIGH = np.array([179, 255, 60])
+WALL_LOW = np.array([0, 0, 0])        # black wall/border - pure black through worn/charcoal-black
+WALL_HIGH = np.array([179, 255, 90])
 
-FLOOR_LOW = np.array([0, 0, 90])      # gray/white tile floor (low saturation)
+FLOOR_LOW = np.array([0, 0, 110])     # gray->white tile floor (low saturation)
 FLOOR_HIGH = np.array([179, 60, 255])
 
 
