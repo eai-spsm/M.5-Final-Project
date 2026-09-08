@@ -1,4 +1,5 @@
 import http.server
+import socket
 import socketserver
 import threading
 import time
@@ -14,28 +15,36 @@ JPEG_QUALITY = 60      # 0-100, lower = smaller/faster, blockier
 TARGET_FPS = 12
 PORT = 8080
 
-# Latest frame + a version counter, shared between the capture thread and
-# any number of viewers. Viewers wait on _new_frame instead of polling, so
-# they only ever send an actually-new frame - no duplicate resends.
-_latest_jpeg = None
+# Latest frame (color + grayscale) + a version counter, shared between the
+# capture thread and any number of viewers. Viewers wait on _new_frame
+# instead of polling, so they only ever send an actually-new frame - no
+# duplicate resends.
+_latest_color = None
+_latest_gray = None
 _frame_id = 0
 _lock = threading.Lock()
 _new_frame = threading.Condition(_lock)
 
 
 def capture_loop(cap):
-    global _latest_jpeg, _frame_id
+    global _latest_color, _latest_gray, _frame_id
     frame_interval = 1.0 / TARGET_FPS
+    encode_params = [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
     while True:
         start = time.time()
         ret, frame = cap.read()
         if not ret:
             continue
-        ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-        if not ok:
+
+        ok_c, jpg_color = cv2.imencode(".jpg", frame, encode_params)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        ok_g, jpg_gray = cv2.imencode(".jpg", gray, encode_params)
+        if not (ok_c and ok_g):
             continue
+
         with _new_frame:
-            _latest_jpeg = jpg.tobytes()
+            _latest_color = jpg_color.tobytes()
+            _latest_gray = jpg_gray.tobytes()
             _frame_id += 1
             _new_frame.notify_all()
 
@@ -44,12 +53,38 @@ def capture_loop(cap):
             time.sleep(frame_interval - elapsed)
 
 
+def _stream(wfile, get_jpeg):
+    last_sent_id = None
+    while True:
+        with _new_frame:
+            while _frame_id == last_sent_id or get_jpeg() is None:
+                _new_frame.wait()
+            jpg = get_jpeg()
+            last_sent_id = _frame_id
+
+        wfile.write(b"--FRAME\r\n")
+        wfile.write(b"Content-Type: image/jpeg\r\n")
+        wfile.write(f"Content-Length: {len(jpg)}\r\n\r\n".encode())
+        wfile.write(jpg)
+        wfile.write(b"\r\n")
+
+
 class StreamingHandler(http.server.BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        # Disable Nagle's algorithm - without this, TCP can hold small
+        # writes (like each JPEG chunk here) for tens of ms trying to
+        # bundle them, which adds up to real, visible stream lag.
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             body = (
-                b"<html><body style='margin:0;background:#111'>"
-                b"<img src='/stream' style='width:100%;display:block' />"
+                b"<html><body style='margin:0;background:#111;display:flex;flex-wrap:wrap'>"
+                b"<div><p style='color:#aaa;font:12px sans-serif;margin:4px'>Color</p>"
+                b"<img src='/stream' style='width:100%;display:block' /></div>"
+                b"<div><p style='color:#aaa;font:12px sans-serif;margin:4px'>Grayscale</p>"
+                b"<img src='/stream_gray' style='width:100%;display:block' /></div>"
                 b"</body></html>"
             )
             self.send_response(200)
@@ -57,28 +92,16 @@ class StreamingHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/stream":
+        elif self.path in ("/stream", "/stream_gray"):
             self.send_response(200)
             self.send_header("Age", "0")
             self.send_header("Cache-Control", "no-cache, private")
             self.send_header("Pragma", "no-cache")
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=FRAME")
             self.end_headers()
-            last_sent_id = None
+            get_jpeg = (lambda: _latest_color) if self.path == "/stream" else (lambda: _latest_gray)
             try:
-                while True:
-                    with _new_frame:
-                        while _frame_id == last_sent_id or _latest_jpeg is None:
-                            _new_frame.wait()
-                        jpg = _latest_jpeg
-                        last_sent_id = _frame_id
-
-                    self.wfile.write(b"--FRAME\r\n")
-                    self.send_header("Content-Type", "image/jpeg")
-                    self.send_header("Content-Length", str(len(jpg)))
-                    self.end_headers()
-                    self.wfile.write(jpg)
-                    self.wfile.write(b"\r\n")
+                _stream(self.wfile, get_jpeg)
             except (BrokenPipeError, ConnectionResetError):
                 pass  # viewer closed the tab/connection
         else:
@@ -93,6 +116,11 @@ def main():
     if not cap.isOpened():
         print("Error: Could not open webcam.")
         return
+    # MJPG capture format + a 1-frame buffer: many USB webcams default to a
+    # slow raw format and buffer several frames internally unless told
+    # otherwise, both of which add startup/streaming lag.
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 

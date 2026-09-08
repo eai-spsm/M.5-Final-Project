@@ -93,6 +93,8 @@ final/
    - Alternatively just open that URL in any regular browser on a device on the same network (phone, laptop).
 3. Ctrl+C on the Pi to stop the stream.
 
+The page shows both a color and a grayscale feed side by side (`/stream` and `/stream_gray`), useful for previewing what a grayscale-based detector (e.g. the black wall/tape) would actually see.
+
 This is view-only — it doesn't run any detection, just shows the raw feed for aiming the camera, checking focus/exposure, etc.
 
 ## Controls
