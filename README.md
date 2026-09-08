@@ -121,6 +121,7 @@ The current tracked position/heading is always shown live on one updating status
 | 3 | Spin rear-left wheel alone (calibration) |
 | 4 | Spin rear-right wheel alone (calibration) |
 | B | About-face (rotate 180° from current heading) |
+| T | Turn by a typed angle (prompts for degrees; + = right/CW, - = left/CCW) |
 | R | Reset tracked position to (0, 0), heading 0 |
 | + / - | Adjust speed by 5 (clamped 20-100) |
 | H | HALT — stops and locks out every other key until H is pressed again (X still works) |

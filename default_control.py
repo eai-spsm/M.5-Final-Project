@@ -6,8 +6,6 @@ import select
 
 from guidance import GuidedDrive
 
-DRIVE_KEYS = {"w", "s", "a", "d", "q", "e", "b"}
-
 
 def get_key(timeout=0.1):
     # Non-blocking single keypress read from the terminal (no Enter needed)
@@ -64,6 +62,7 @@ def main():
     print("W/S forward/back, A/D strafe, Q/E rotate, SPACE stop, X to quit.")
     print("1/2/3/4 = spin FL/FR/RL/RR alone, for wiring calibration.")
     print("B = about-face (rotate 180 from current heading).")
+    print("T = turn by a typed angle (+ = right/CW, - = left/CCW).")
     print("R = reset tracked position to (0, 0), heading 0.")
     print("+/- = adjust speed.")
     print("H = HALT (locks out other keys until H is pressed again).")
@@ -130,6 +129,16 @@ def main():
                     drive.rotate_to(target)
                     timer.start_if_needed()
                     action = "About-face"
+                elif key == "t":
+                    try:
+                        degrees = float(input("\nTurn by how many degrees (+ right, - left): "))
+                    except ValueError:
+                        action = "Turn cancelled (not a number)"
+                    else:
+                        target = (drive.pose()[2] + degrees) % 360
+                        drive.rotate_to(target)
+                        timer.start_if_needed()
+                        action = f"Turned {degrees:+.0f}°"
                 elif key == "r":
                     drive.reset_position()
                     action = "Position reset"
