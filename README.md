@@ -120,7 +120,7 @@ The current tracked position/heading is always shown live on one updating status
 | 2 | Spin front-right wheel alone (calibration) |
 | 3 | Spin rear-left wheel alone (calibration) |
 | 4 | Spin rear-right wheel alone (calibration) |
-| B | About-face (rotate 180° from current heading) |
+| B | About-face — turns exactly 180° from current heading (tracked value, not just "close enough") |
 | T | Turn by a typed angle (prompts for degrees; + = right/CW, - = left/CCW) |
 | R | Reset tracked position to (0, 0), heading 0 |
 | + / - | Adjust speed by 5 (clamped 20-100) |

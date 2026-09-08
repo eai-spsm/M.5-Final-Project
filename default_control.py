@@ -125,8 +125,7 @@ def main():
                     drive.test_wheel("rr")
                     action = "Testing RR"
                 elif key == "b":
-                    target = (drive.pose()[2] + 180) % 360
-                    drive.rotate_to(target)
+                    drive.about_face()
                     timer.start_if_needed()
                     action = "About-face"
                 elif key == "t":

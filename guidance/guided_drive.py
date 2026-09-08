@@ -87,6 +87,18 @@ class GuidedDrive:
             time.sleep(0.05)
         self.stop()
 
+    def about_face(self, speed=None, tolerance_deg=5, timeout=5.0):
+        # Turns exactly 180 from whatever heading it's at right now.
+        # rotate_to() alone can stop up to tolerance_deg short/long of the
+        # target, so this snaps the TRACKED heading to precisely +180 after
+        # - the tracked value is always exactly a 180 turn, even though the
+        # real-world turn is still only as good as ROTATE_SPEED_DEG_S (no
+        # encoders to confirm it physically).
+        x, y, start_heading = self.pose()
+        target = (start_heading + 180) % 360
+        self.rotate_to(target, speed=speed, tolerance_deg=tolerance_deg, timeout=timeout)
+        self.nav.reset(x, y, target)
+
     def test_wheel(self, name):
         self.drive.test_wheel(name)
 
