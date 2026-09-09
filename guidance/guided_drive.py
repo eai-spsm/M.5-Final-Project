@@ -18,7 +18,13 @@ from .navigator import Navigator
 # angle turned with a protractor/known angle mark instead of distance).
 LINEAR_SPEED_CM_S = 20.0
 STRAFE_SPEED_CM_S = 15.0
-ROTATE_SPEED_DEG_S = 180.0  # was 90 - observed exactly ~2x overshoot on rotate_to(), see below
+ROTATE_SPEED_DEG_S = 93.0  # was 180 - a 350deg tracked search sweep completed only ~180deg of
+                            # real rotation (ratio 350/180 ~= 1.94), so back-solved:
+                            # 180 * (180/350) ~= 93. The earlier 90->180 doubling was based on a
+                            # rougher qualitative report (rotate_to() overshooting a target by
+                            # "about 2x"); this is a direct ratio from an actual measurement, so
+                            # trust it more - but still do the real timed-rotation + protractor
+                            # calibration in the comment above when possible for a solid number.
 
 MIN_SPEED = 20   # below this, motors risk stalling (see docs/CALIBRATION_REPORT.md)
 MAX_SPEED = 100

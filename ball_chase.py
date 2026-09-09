@@ -64,6 +64,21 @@ GOAL_ZONE_Y_TOLERANCE_CM = 20.0
 GOAL_ZONE_HEADING_DEG = 0.0
 GOAL_ZONE_HEADING_TOLERANCE_DEG = 45.0  # 315-45 deg, i.e. +-45 around GOAL_ZONE_HEADING_DEG
 
+# Same idea, same caveats, for the side walls - independent backup for
+# the vision-based WALL_COVERAGE_THRESHOLD check above, not a replacement
+# for it. Measured from two different starting placements on the field,
+# which mirror each other (starting on the other side flips which wall is
+# closer): set STARTING_POSITION to whichever one applies before a
+# match/test run rather than hand-editing the two numbers each time.
+STARTING_POSITION = "1L"  # or "1R"
+_WALL_X_BY_START = {
+    "1L": {"left": -34.0, "right": 41.0},
+    "1R": {"left": -41.0, "right": 34.0},
+}
+WALL_X_LEFT_CM = _WALL_X_BY_START[STARTING_POSITION]["left"]
+WALL_X_RIGHT_CM = _WALL_X_BY_START[STARTING_POSITION]["right"]
+WALL_ZONE_X_TOLERANCE_CM = 15.0
+
 # PLACEHOLDER - confirm against the real field/starting setup. World-frame
 # heading (Navigator's convention: 0 = wherever the robot was facing at
 # the start) that the OPPONENT's goal is roughly in the direction of. Used
@@ -131,6 +146,15 @@ def _in_goal_zone(pose):
     return abs(heading_diff) <= GOAL_ZONE_HEADING_TOLERANCE_DEG
 
 
+def _near_side_wall(pose):
+    # Independent, vision-free "am I near a side wall" backup - see the
+    # PLACEHOLDER caveat on the WALL_X_* constants above (and remember to
+    # set STARTING_POSITION correctly before relying on this).
+    x, _, _ = pose
+    return (abs(x - WALL_X_LEFT_CM) <= WALL_ZONE_X_TOLERANCE_CM
+            or abs(x - WALL_X_RIGHT_CM) <= WALL_ZONE_X_TOLERANCE_CM)
+
+
 def guess_goal_ownership(current_heading_deg, gap_bearing_deg, opponent_goal_heading_deg=OPPONENT_GOAL_HEADING_DEG):
     # A detected wall gap only says "there's an opening here", not which
     # goal it is - reconcile using the tracked heading. Converts the gap's
@@ -183,11 +207,14 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
         on_frame(frame, masks)
 
     wall_fraction = float((masks["wall"] > 0).mean())
-    if wall_fraction >= WALL_COVERAGE_THRESHOLD:
+    near_wall_by_position = _near_side_wall(drive.pose())
+    if wall_fraction >= WALL_COVERAGE_THRESHOLD or near_wall_by_position:
         drive.backward()
         search_state["searching"] = False
         search_state.pop("engaged_since", None)
-        return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
+        if wall_fraction >= WALL_COVERAGE_THRESHOLD:
+            return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
+        return "Near side wall (position) - backing up"
 
     distance = drive.get_distance()
 
