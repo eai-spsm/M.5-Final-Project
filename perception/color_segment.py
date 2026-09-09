@@ -76,6 +76,57 @@ def ball_angle_offset(center_x, frame_width, fov_deg=CAMERA_HFOV_DEG):
     return offset_fraction * (fov_deg / 2)
 
 
+# A goal opening isn't a different color from the wall - it's the SAME
+# wall color, just shorter there (barrier drops near the ground, more open
+# background visible above it). So instead of another HSV range, this
+# looks for a dip in per-column wall HEIGHT: a normal wall run has a
+# roughly steady pixel count per column; a goal gap is a stretch of
+# columns where that count drops well below the surrounding baseline.
+GOAL_GAP_MIN_WIDTH_PX = 30    # ignore narrow dips (segment joints, noise)
+GOAL_GAP_DIP_RATIO = 0.5      # column counts below this fraction of the
+                              # baseline count as "part of the gap"
+
+
+def find_goal_gap(wall_mask, min_width_px=GOAL_GAP_MIN_WIDTH_PX, dip_ratio=GOAL_GAP_DIP_RATIO):
+    """Looks for a goal-width dip in the wall mask's per-column height
+    profile. Returns {"center_x", "width_px"} for the widest qualifying
+    dip, or None if nothing wide enough was found.
+    """
+    col_counts = (wall_mask > 0).sum(axis=0).astype(float)
+    if not col_counts.any():
+        return None  # no wall visible at all this frame - nothing to compare against
+
+    baseline = np.median(col_counts[col_counts > 0])
+    if baseline <= 0:
+        return None
+    threshold = baseline * dip_ratio
+
+    is_gap = col_counts < threshold
+
+    # Find the widest contiguous run of gap columns.
+    best_start, best_len = None, 0
+    run_start = None
+    for x, gap in enumerate(is_gap):
+        if gap:
+            if run_start is None:
+                run_start = x
+        else:
+            if run_start is not None:
+                run_len = x - run_start
+                if run_len > best_len:
+                    best_start, best_len = run_start, run_len
+                run_start = None
+    if run_start is not None:  # run reached the right edge of the frame
+        run_len = len(is_gap) - run_start
+        if run_len > best_len:
+            best_start, best_len = run_start, run_len
+
+    if best_start is None or best_len < min_width_px:
+        return None
+
+    return {"center_x": best_start + best_len / 2, "width_px": best_len}
+
+
 def build_debug_view(frame, masks=None):
     # 2x2 grid: ball detection (annotated) | ball cut-out
     #           wall cut-out               | floor cut-out

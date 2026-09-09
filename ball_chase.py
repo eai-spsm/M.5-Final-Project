@@ -3,7 +3,7 @@ import time
 import cv2
 
 from guidance import GuidedDrive
-from perception import get_masks, ball_center, ball_angle_offset
+from perception import get_masks, ball_center, ball_angle_offset, find_goal_gap
 
 FRAME_WIDTH = 320
 FRAME_HEIGHT = 240
@@ -29,6 +29,20 @@ WALL_COVERAGE_THRESHOLD = 0.80
 EVADE_DISTANCE_CM = 15
 EVADE_SPEED = 45
 
+# Don't linger in front of a goal opening (either one) for longer than
+# this - matches the rulebook's forbidden-zone-near-goal idea. Proximity
+# is gated on the ultrasonic (GOAL_AREA_DISTANCE_CM) so a goal merely
+# visible far across the field doesn't start the clock.
+GOAL_AREA_DISTANCE_CM = 30
+GOAL_DWELL_LIMIT_S = 5.0
+
+# PLACEHOLDER - confirm against the real field/starting setup. World-frame
+# heading (Navigator's convention: 0 = wherever the robot was facing at
+# the start) that the OPPONENT's goal is roughly in the direction of. Used
+# to guess which goal a detected gap belongs to when there's no ArUco tag
+# (or it's not legible) to say for certain - see guess_goal_ownership().
+OPPONENT_GOAL_HEADING_DEG = 0.0
+
 # After spinning this many degrees without finding the ball, assume it's
 # not visible from here (behind something, out of view) and nudge forward
 # before continuing the search, instead of spinning in the same spot
@@ -39,6 +53,19 @@ SEARCH_FULL_SWEEP_DEG = 350
 # disconnected (not just a one-off dropped frame) and try to reopen it.
 CAMERA_RECONNECT_AFTER = 20
 CAMERA_RECONNECT_RETRY_DELAY = 1.0
+
+
+def guess_goal_ownership(current_heading_deg, gap_bearing_deg, opponent_goal_heading_deg=OPPONENT_GOAL_HEADING_DEG):
+    # A detected wall gap only says "there's an opening here", not which
+    # goal it is - reconcile using the tracked heading. Converts the gap's
+    # frame-relative bearing into an absolute world-frame direction, then
+    # checks which goal's assumed heading it's closer to (+-90 deg = same
+    # half of the compass). Prefer an ArUco tag ID when one's visible
+    # (perception.aruco_goal) - that's ground truth; this is a fallback
+    # guess for when a tag isn't visible/legible.
+    world_bearing = (current_heading_deg + gap_bearing_deg) % 360
+    diff = (world_bearing - opponent_goal_heading_deg + 180) % 360 - 180  # -180..180
+    return "opponent" if abs(diff) <= 90 else "own"
 
 
 def open_camera():
@@ -85,6 +112,26 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
         search_state["searching"] = False
         return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
 
+    distance = drive.get_distance()
+
+    # Don't overstay near a goal opening (rule compliance, not physical
+    # safety like the wall/evade checks) - track how long we've been
+    # close to one and force a retreat past GOAL_DWELL_LIMIT_S. Doesn't
+    # need to know which goal (see guess_goal_ownership() for that,
+    # used elsewhere for not shooting into our own goal).
+    gap = find_goal_gap(masks["wall"])
+    near_goal = gap is not None and distance is not None and distance < GOAL_AREA_DISTANCE_CM
+    if near_goal:
+        if "goal_area_since" not in search_state:
+            search_state["goal_area_since"] = time.time()
+        dwell = time.time() - search_state["goal_area_since"]
+        if dwell >= GOAL_DWELL_LIMIT_S:
+            drive.backward()
+            search_state["searching"] = False
+            return f"In goal area {dwell:.1f}s - leaving"
+    else:
+        search_state.pop("goal_area_since", None)
+
     center = ball_center(masks["ball"])
     angle = ball_angle_offset(center[0], frame.shape[1]) if center is not None else None
     if angle is not None:
@@ -93,7 +140,6 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
         # toward the side it was last seen on.
         search_state["last_ball_angle"] = angle
 
-    distance = drive.get_distance()
     if distance is not None and distance < EVADE_DISTANCE_CM:
         # Not the wall (that's already handled above) - something else is
         # right in front of us, most likely between us and the ball. Go
