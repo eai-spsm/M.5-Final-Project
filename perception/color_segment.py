@@ -76,10 +76,13 @@ def ball_angle_offset(center_x, frame_width, fov_deg=CAMERA_HFOV_DEG):
     return offset_fraction * (fov_deg / 2)
 
 
-def build_debug_view(frame):
+def build_debug_view(frame, masks=None):
     # 2x2 grid: ball detection (annotated) | ball cut-out
     #           wall cut-out               | floor cut-out
-    masks = get_masks(frame)
+    # Pass masks in if the caller already has them (from get_masks) to
+    # avoid recomputing.
+    if masks is None:
+        masks = get_masks(frame)
 
     wall_view = cut_out(frame, masks["wall"])
     floor_view = cut_out(frame, masks["floor"])

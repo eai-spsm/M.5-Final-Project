@@ -24,15 +24,22 @@ def open_camera():
     return cap
 
 
-def chase_step(cap, drive):
+def chase_step(cap, drive, on_frame=None):
     # Reads one frame and reacts to it: turn toward the ball, drive at it
     # once centered, or stop if it's not visible. Returns a short status
     # string for the caller to display.
+    #
+    # on_frame, if given, is called with (frame, masks) for every frame -
+    # e.g. to push a live view somewhere - without a second camera read
+    # (only one process/reader can hold a webcam open at a time).
     ret, frame = cap.read()
     if not ret:
         return "Camera read failed"
 
     masks = get_masks(frame)
+    if on_frame is not None:
+        on_frame(frame, masks)
+
     center = ball_center(masks["ball"])
 
     if center is None:
@@ -49,11 +56,11 @@ def chase_step(cap, drive):
         return f"Ball centered ({angle:+5.1f} deg) - approaching"
 
 
-def chase_loop(cap, drive):
+def chase_loop(cap, drive, on_frame=None):
     # Blocks forever, reacting to the ball frame by frame. Caller handles
     # KeyboardInterrupt/cleanup.
     while True:
-        status = chase_step(cap, drive)
+        status = chase_step(cap, drive, on_frame=on_frame)
         print(f"\r{status:<45}", end="", flush=True)
 
 
