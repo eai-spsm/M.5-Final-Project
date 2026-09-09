@@ -11,6 +11,10 @@ FRAME_HEIGHT = 240
 # ahead already.
 CENTERED_TOLERANCE_DEG = 8
 
+# Duty cycle % used while spinning to search for the ball - slower than a
+# normal turn so a frame doesn't blur past the ball and miss it.
+SEARCH_SPEED = 40
+
 
 def open_camera():
     cap = cv2.VideoCapture(0)
@@ -43,8 +47,11 @@ def chase_step(cap, drive, on_frame=None):
     center = ball_center(masks["ball"])
 
     if center is None:
-        drive.stop()
-        return "Searching..."
+        # Not found - spin in place (continues however far around it takes,
+        # "360" isn't tracked/enforced, it just keeps going until a frame
+        # finds the ball) rather than sitting stopped and blind.
+        drive.rotate_right(speed=SEARCH_SPEED)
+        return "Searching (spinning)..."
 
     angle = ball_angle_offset(center[0], frame.shape[1])
     if abs(angle) > CENTERED_TOLERANCE_DEG:
