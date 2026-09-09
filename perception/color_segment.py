@@ -76,38 +76,49 @@ def ball_angle_offset(center_x, frame_width, fov_deg=CAMERA_HFOV_DEG):
     return offset_fraction * (fov_deg / 2)
 
 
-# A goal opening isn't a different color from the wall - it's the SAME
-# wall color, just shorter there (barrier drops near the ground, more open
-# background visible above it). So instead of another HSV range, this
-# looks for a dip in per-column wall HEIGHT: a normal wall run has a
-# roughly steady pixel count per column; a goal gap is a stretch of
-# columns where that count drops well below the surrounding baseline.
-GOAL_GAP_MIN_WIDTH_PX = 30    # ignore narrow dips (segment joints, noise)
-GOAL_GAP_DIP_RATIO = 0.5      # column counts below this fraction of the
-                              # baseline count as "part of the gap"
+# A goal opening isn't a different color from the wall - it's the same
+# black, just arranged differently vertically. A normal wall section has
+# TWO separate black bands per column: a lower rail near the ground, an
+# open white gap above it, then an upper rail - 2 separate black runs
+# going up the column. A goal only has the top crossbar (the lower rail
+# is absent, open floor/background all the way down beneath it) - 1
+# black run. This is far more specific than just "wall looks shorter
+# here", which also fires on plain perspective/lighting variation.
+GOAL_GAP_MIN_WIDTH_PX = 30  # ignore narrow single-column noise/joints
 
 
-def find_goal_gap(wall_mask, min_width_px=GOAL_GAP_MIN_WIDTH_PX, dip_ratio=GOAL_GAP_DIP_RATIO):
-    """Looks for a goal-width dip in the wall mask's per-column height
-    profile. Returns {"center_x", "width_px"} for the widest qualifying
-    dip, or None if nothing wide enough was found.
+def _vertical_run_count(column):
+    # How many separate contiguous "on" (wall) runs going down this one
+    # column of the mask.
+    runs = 0
+    in_run = False
+    for v in column:
+        on = v > 0
+        if on and not in_run:
+            runs += 1
+        in_run = on
+    return runs
+
+
+def find_goal_gap(wall_mask, min_width_px=GOAL_GAP_MIN_WIDTH_PX):
+    """Looks for a goal-width stretch of columns that have only ONE
+    vertical black band (crossbar-only) instead of the normal wall's two
+    (lower rail + upper rail with a gap between). Returns
+    {"center_x", "width_px"} for the widest qualifying stretch, or None.
     """
-    col_counts = (wall_mask > 0).sum(axis=0).astype(float)
-    if not col_counts.any():
-        return None  # no wall visible at all this frame - nothing to compare against
+    height, width = wall_mask.shape
+    is_single_bar = np.zeros(width, dtype=bool)
+    for x in range(width):
+        column = wall_mask[:, x]
+        if not column.any():
+            continue  # no wall visible in this column at all - not a crossbar-only signal
+        is_single_bar[x] = _vertical_run_count(column) == 1
 
-    baseline = np.median(col_counts[col_counts > 0])
-    if baseline <= 0:
-        return None
-    threshold = baseline * dip_ratio
-
-    is_gap = col_counts < threshold
-
-    # Find the widest contiguous run of gap columns.
+    # Find the widest contiguous run of single-bar columns.
     best_start, best_len = None, 0
     run_start = None
-    for x, gap in enumerate(is_gap):
-        if gap:
+    for x, single in enumerate(is_single_bar):
+        if single:
             if run_start is None:
                 run_start = x
         else:
@@ -117,7 +128,7 @@ def find_goal_gap(wall_mask, min_width_px=GOAL_GAP_MIN_WIDTH_PX, dip_ratio=GOAL_
                     best_start, best_len = run_start, run_len
                 run_start = None
     if run_start is not None:  # run reached the right edge of the frame
-        run_len = len(is_gap) - run_start
+        run_len = width - run_start
         if run_len > best_len:
             best_start, best_len = run_start, run_len
 
