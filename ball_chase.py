@@ -47,14 +47,16 @@ GOAL_DWELL_LIMIT_S = 5.0
 # (or it's not legible) to say for certain - see guess_goal_ownership().
 OPPONENT_GOAL_HEADING_DEG = 0.0
 
-# If the ball's been dead-centered and we've been driving straight at it
-# continuously for this long without ever completing the approach, it's
-# very likely pinned against the wall (or something else) rather than
-# genuinely still closing distance from far away - back off and come at
-# it from an angle instead of pushing uselessly straight into whatever's
+# If we've been engaged with (facing/pushing at) a found ball for this
+# long AND it hasn't grown at least this much bigger in-frame (i.e.
+# genuinely gotten closer) in that time, it's very likely pinned against
+# the wall (or something else) rather than a ball that's just far away and
+# legitimately still taking a while to reach - back off and come at it
+# from an angle instead of pushing uselessly straight into whatever's
 # behind it. Not gated on the ultrasonic since a small ball flush against
 # a flat wall may not reliably register as "close" on its own.
 PIN_STUCK_TIME_S = 3.0
+PIN_GROWTH_RATIO = 1.15  # need at least 15% more apparent area to count as real progress
 UNPIN_BACKUP_S = 1.0
 UNPIN_STRAFE_S = 1.0
 UNPIN_SPEED = 45
@@ -179,11 +181,25 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
 
     center = ball_center(masks["ball"])
     angle = ball_angle_offset(center[0], frame.shape[1]) if center is not None else None
+    ball_area = int((masks["ball"] > 0).sum()) if center is not None else None
     if angle is not None:
         # Remembered even when we're about to evade instead of chase, so an
         # evade triggered the moment the ball gets blocked can still evade
         # toward the side it was last seen on.
         search_state["last_ball_angle"] = angle
+
+    if gap is not None and center is not None:
+        gap_left = gap["center_x"] - gap["width_px"] / 2
+        gap_right = gap["center_x"] + gap["width_px"] / 2
+        if gap_left <= center[0] <= gap_right:
+            # The ball itself is sitting inside a detected goal opening -
+            # don't chase it in, regardless of how far WE currently are
+            # from the gap (the near_goal check above only fires once we
+            # ourselves are close).
+            drive.stop()
+            search_state["searching"] = False
+            search_state.pop("engaged_since", None)
+            return "Ball is in the goal opening - not following"
 
     if distance is not None and distance < EVADE_DISTANCE_CM:
         # Not the wall (that's already handled above) - something else is
@@ -217,7 +233,12 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
             search_state["swept_deg"] += abs(delta)
         search_state["last_heading"] = heading
 
-        drive.rotate_right(speed=SEARCH_SPEED)
+        # Default speed here, not SEARCH_SPEED - ROTATE_SPEED_DEG_S (used
+        # to track swept degrees) was calibrated against manual E/Q
+        # rotation at the default speed, and duty-cycle-to-rotation-rate
+        # isn't necessarily linear, so spinning at a different speed here
+        # would make the tracked sweep drift from the real rotation.
+        drive.rotate_right()
         swept = search_state["swept_deg"]
 
         if swept >= SEARCH_FULL_SWEEP_DEG:
@@ -238,16 +259,33 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
     # lived in one of them accumulate a real 3 continuous seconds.
     if "engaged_since" not in search_state:
         search_state["engaged_since"] = time.time()
+        search_state["engaged_start_area"] = ball_area
     engaged_elapsed = time.time() - search_state["engaged_since"]
 
     if engaged_elapsed >= PIN_STUCK_TIME_S:
-        # Been facing/pushing at a found ball for too long without ever
-        # completing the approach - probably pinned against the wall.
-        search_state.pop("engaged_since", None)
-        search_state["unpin_phase"] = "backing"
-        search_state["unpin_start"] = time.time()
-        drive.backward()
-        return f"Ball pinned ({engaged_elapsed:.1f}s engaged) - backing off"
+        # Elapsed time alone isn't enough - if the ball's simply far away,
+        # a genuine approach can easily take longer than PIN_STUCK_TIME_S
+        # with nothing wrong at all. Check whether it's actually gotten
+        # bigger in-frame (i.e. closer) since this window started; if so
+        # that's real progress, not a stall - just start a fresh window
+        # rather than backing off from a ball we're legitimately still
+        # closing in on.
+        start_area = search_state.get("engaged_start_area") or 1
+        making_progress = ball_area >= start_area * PIN_GROWTH_RATIO
+        if not making_progress:
+            # No meaningful growth despite pushing at it this whole time -
+            # actually stuck, most likely pinned against the wall.
+            search_state.pop("engaged_since", None)
+            search_state.pop("engaged_start_area", None)
+            search_state["unpin_phase"] = "backing"
+            search_state["unpin_start"] = time.time()
+            drive.backward()
+            return f"Ball pinned ({engaged_elapsed:.1f}s engaged) - backing off"
+        # Otherwise: real progress, just start a fresh window and fall
+        # through to normal turn/approach below instead of returning
+        # early without ever issuing a drive command this frame.
+        search_state["engaged_since"] = time.time()
+        search_state["engaged_start_area"] = ball_area
 
     if abs(angle) > CENTERED_TOLERANCE_DEG:
         target = (drive.pose()[2] + angle) % 360
