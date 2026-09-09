@@ -18,7 +18,7 @@ from .navigator import Navigator
 # angle turned with a protractor/known angle mark instead of distance).
 LINEAR_SPEED_CM_S = 20.0
 STRAFE_SPEED_CM_S = 15.0
-ROTATE_SPEED_DEG_S = 90.0
+ROTATE_SPEED_DEG_S = 180.0  # was 90 - observed exactly ~2x overshoot on rotate_to(), see below
 
 MIN_SPEED = 20   # below this, motors risk stalling (see docs/CALIBRATION_REPORT.md)
 MAX_SPEED = 100
