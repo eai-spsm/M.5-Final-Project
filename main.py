@@ -118,10 +118,27 @@ def main():
         on_frame = None
         if SERVE_LIVE_VIEW:
             socketserver.ThreadingTCPServer.allow_reuse_address = True  # avoid "Address already in use" on a quick restart
-            server = socketserver.ThreadingTCPServer(("0.0.0.0", LIVE_VIEW_PORT), _StreamingHandler)
-            threading.Thread(target=server.serve_forever, daemon=True).start()
-            print(f"Live view at http://<pi-ip-address>:{LIVE_VIEW_PORT}/")
-            on_frame = _on_frame
+            # If the port's genuinely held by something else (not just a
+            # TIME_WAIT cooldown, which allow_reuse_address already
+            # covers - e.g. a still-running previous instance), try the
+            # next few ports rather than crashing the whole run over a
+            # view that's a debugging aid, not core functionality.
+            port = LIVE_VIEW_PORT
+            for attempt in range(5):
+                try:
+                    server = socketserver.ThreadingTCPServer(("0.0.0.0", port), _StreamingHandler)
+                    break
+                except OSError as e:
+                    print(f"Port {port} unavailable ({e}), trying {port + 1}...")
+                    port += 1
+            else:
+                print("Could not bind a live-view port after 5 attempts - continuing without it.")
+                server = None
+
+            if server is not None:
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+                print(f"Live view at http://<pi-ip-address>:{port}/")
+                on_frame = _on_frame
 
         print("Chasing the ball. Ctrl+C to stop.")
         chase_loop(cap, drive, on_frame=on_frame, on_reconnect=_track_cap)
