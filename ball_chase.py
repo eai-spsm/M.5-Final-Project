@@ -50,6 +50,20 @@ GOAL_DWELL_LIMIT_S = 5.0
 GOAL_GAP_CONFIRM_FRAMES = 5
 GOAL_GAP_POSITION_TOLERANCE_PX = 40
 
+# PLACEHOLDER - an independent backup layer for "am I near a goal", using
+# tracked position/heading instead of vision, so a frame where find_goal_gap
+# misses (occlusion, bad angle, glare) doesn't lose this safety entirely.
+# NOT more trustworthy than the vision check - Navigator has no encoders
+# and drifts over a match, and this Y coordinate is only valid relative to
+# wherever the robot was last zeroed (reset_position()), which needs
+# redoing every time it's placed at a new starting spot (robots return to
+# their own half after every goal - rule 6.3). Confirm/recalibrate these
+# against the real field before trusting them alone.
+GOAL_ZONE_Y_CM = 118.0
+GOAL_ZONE_Y_TOLERANCE_CM = 20.0
+GOAL_ZONE_HEADING_DEG = 0.0
+GOAL_ZONE_HEADING_TOLERANCE_DEG = 45.0  # 315-45 deg, i.e. +-45 around GOAL_ZONE_HEADING_DEG
+
 # PLACEHOLDER - confirm against the real field/starting setup. World-frame
 # heading (Navigator's convention: 0 = wherever the robot was facing at
 # the start) that the OPPONENT's goal is roughly in the direction of. Used
@@ -105,6 +119,16 @@ def _confirmed_goal_gap(raw_gap, search_state):
     if search_state["goal_gap_streak"] >= GOAL_GAP_CONFIRM_FRAMES:
         return raw_gap
     return None
+
+
+def _in_goal_zone(pose):
+    # Independent, vision-free "am I near a goal" backup - see the
+    # PLACEHOLDER caveat on the GOAL_ZONE_* constants above.
+    _, y, heading = pose
+    if abs(y - GOAL_ZONE_Y_CM) > GOAL_ZONE_Y_TOLERANCE_CM:
+        return False
+    heading_diff = (heading - GOAL_ZONE_HEADING_DEG + 180) % 360 - 180  # -180..180
+    return abs(heading_diff) <= GOAL_ZONE_HEADING_TOLERANCE_DEG
 
 
 def guess_goal_ownership(current_heading_deg, gap_bearing_deg, opponent_goal_heading_deg=OPPONENT_GOAL_HEADING_DEG):
@@ -175,7 +199,11 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
     gap = _confirmed_goal_gap(find_goal_gap(masks["wall"]), search_state)
     close_by_ultrasonic = distance is not None and distance < GOAL_AREA_DISTANCE_CM
     close_by_width = gap is not None and gap["width_px"] >= GOAL_GAP_CLOSE_WIDTH_FRACTION * frame.shape[1]
-    near_goal = gap is not None and (close_by_ultrasonic or close_by_width)
+    # close_by_zone can trigger even with no gap seen this frame at all -
+    # that's the point of an independent backup (occlusion, bad angle,
+    # glare defeating vision for a moment shouldn't lose this safety).
+    close_by_zone = _in_goal_zone(drive.pose())
+    near_goal = (gap is not None and (close_by_ultrasonic or close_by_width)) or close_by_zone
     if near_goal:
         if "goal_area_since" not in search_state:
             search_state["goal_area_since"] = time.time()
