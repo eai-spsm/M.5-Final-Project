@@ -1,7 +1,8 @@
 import RPi.GPIO as GPIO
 from time import sleep
 
-from movement import MecanumDrive
+from guidance import GuidedDrive
+from ball_chase import open_camera, chase_loop
 
 # Start button (pulled up, wired to GND when pressed)
 BTN_PIN = 21
@@ -12,7 +13,8 @@ GPIO.setup(BTN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 
 def main():
-    drive = MecanumDrive()
+    drive = GuidedDrive()
+    cap = None
     try:
         print("Ready. Press the button to start...")
         while True:
@@ -21,14 +23,22 @@ def main():
                 break
             sleep(0.05)
 
-        # TODO: put your startup logic here (e.g. perception + drive loop)
+        cap = open_camera()
+        if cap is None:
+            return
+
+        print("Chasing the ball. Ctrl+C to stop.")
+        chase_loop(cap, drive)
 
     except KeyboardInterrupt:
         print("\nProgram stopped by user.")
 
     finally:
         print("Cleaning up GPIO resources...")
+        drive.stop()
         drive.cleanup()
+        if cap is not None:
+            cap.release()
         print("Done!")
 
 
