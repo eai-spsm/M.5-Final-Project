@@ -22,6 +22,13 @@ SEARCH_SPEED = 40
 # whatever the ball logic thinks it sees.
 WALL_COVERAGE_THRESHOLD = 0.80
 
+# If something's this close according to the ultrasonic AND it's not the
+# wall (that's handled separately above, by the vision check), evade it -
+# doesn't matter what it actually is (opponent robot, dropped object,
+# anything), the ultrasonic can't tell and doesn't need to.
+EVADE_DISTANCE_CM = 15
+EVADE_SPEED = 45
+
 # After spinning this many degrees without finding the ball, assume it's
 # not visible from here (behind something, out of view) and nudge forward
 # before continuing the search, instead of spinning in the same spot
@@ -77,6 +84,15 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
         drive.backward()
         search_state["searching"] = False
         return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
+
+    distance = drive.get_distance()
+    if distance is not None and distance < EVADE_DISTANCE_CM:
+        # Not the wall (that's already handled above) - something else is
+        # right in front of us. Strafe around it rather than plowing
+        # forward or spinning in place.
+        drive.strafe_right(speed=EVADE_SPEED)
+        search_state["searching"] = False
+        return f"Obstruction at {distance:.0f}cm - evading"
 
     center = ball_center(masks["ball"])
 

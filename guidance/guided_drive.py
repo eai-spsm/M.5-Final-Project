@@ -102,6 +102,9 @@ class GuidedDrive:
     def test_wheel(self, name):
         self.drive.test_wheel(name)
 
+    def get_distance(self):
+        return self.drive.get_distance()
+
     def pose(self):
         return self.nav.pose()
 
