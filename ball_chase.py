@@ -30,10 +30,14 @@ EVADE_DISTANCE_CM = 15
 EVADE_SPEED = 45
 
 # Don't linger in front of a goal opening (either one) for longer than
-# this - matches the rulebook's forbidden-zone-near-goal idea. Proximity
-# is gated on the ultrasonic (GOAL_AREA_DISTANCE_CM) so a goal merely
-# visible far across the field doesn't start the clock.
+# this - matches the rulebook's forbidden-zone-near-goal idea. "Close to
+# one" is either the ultrasonic (GOAL_AREA_DISTANCE_CM) OR the gap simply
+# looking wide in-frame (GOAL_GAP_CLOSE_WIDTH_FRACTION) - vision alone is
+# enough to trigger this, since relying only on the ultrasonic means this
+# safety silently does nothing if that sensor isn't giving reliable close
+# readings.
 GOAL_AREA_DISTANCE_CM = 30
+GOAL_GAP_CLOSE_WIDTH_FRACTION = 0.5
 GOAL_DWELL_LIMIT_S = 5.0
 
 # PLACEHOLDER - confirm against the real field/starting setup. World-frame
@@ -122,7 +126,7 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
     if wall_fraction >= WALL_COVERAGE_THRESHOLD:
         drive.backward()
         search_state["searching"] = False
-        search_state.pop("approaching_since", None)
+        search_state.pop("engaged_since", None)
         return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
 
     distance = drive.get_distance()
@@ -133,13 +137,15 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
     # need to know which goal (see guess_goal_ownership() for that,
     # used elsewhere for not shooting into our own goal).
     gap = find_goal_gap(masks["wall"])
-    near_goal = gap is not None and distance is not None and distance < GOAL_AREA_DISTANCE_CM
+    close_by_ultrasonic = distance is not None and distance < GOAL_AREA_DISTANCE_CM
+    close_by_width = gap is not None and gap["width_px"] >= GOAL_GAP_CLOSE_WIDTH_FRACTION * frame.shape[1]
+    near_goal = gap is not None and (close_by_ultrasonic or close_by_width)
     if near_goal:
         if "goal_area_since" not in search_state:
             search_state["goal_area_since"] = time.time()
         dwell = time.time() - search_state["goal_area_since"]
         search_state["searching"] = False
-        search_state.pop("approaching_since", None)
+        search_state.pop("engaged_since", None)
         if dwell >= GOAL_DWELL_LIMIT_S:
             drive.backward()
             return f"In goal area {dwell:.1f}s - backing out"
@@ -193,11 +199,11 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
             drive.strafe_right(speed=EVADE_SPEED)
             direction = "right"
         search_state["searching"] = False
-        search_state.pop("approaching_since", None)
+        search_state.pop("engaged_since", None)
         return f"Obstruction at {distance:.0f}cm - evading {direction} toward ball"
 
     if center is None:
-        search_state.pop("approaching_since", None)
+        search_state.pop("engaged_since", None)
         heading = drive.pose()[2]
         if not search_state.get("searching"):
             search_state["searching"] = True
@@ -223,24 +229,30 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
 
     search_state["searching"] = False
 
-    if abs(angle) > CENTERED_TOLERANCE_DEG:
-        search_state.pop("approaching_since", None)
-        target = (drive.pose()[2] + angle) % 360
-        drive.rotate_to(target)
-        return f"Ball at {angle:+5.1f} deg - turning"
+    # Ball found, not evading - track how long we've been engaged with
+    # (facing/pushing at) it, shared across both the "turning" and
+    # "approaching" branches below rather than reset by whichever one
+    # this particular frame lands in. A jittering angle right at the
+    # CENTERED_TOLERANCE_DEG boundary would otherwise keep flipping
+    # between the two branches and never let a pin-stuck timer that only
+    # lived in one of them accumulate a real 3 continuous seconds.
+    if "engaged_since" not in search_state:
+        search_state["engaged_since"] = time.time()
+    engaged_elapsed = time.time() - search_state["engaged_since"]
 
-    if "approaching_since" not in search_state:
-        search_state["approaching_since"] = time.time()
-    approach_elapsed = time.time() - search_state["approaching_since"]
-
-    if approach_elapsed >= PIN_STUCK_TIME_S:
-        # Been driving straight at a centered ball for too long without
-        # ever completing the approach - probably pinned against the wall.
-        search_state.pop("approaching_since", None)
+    if engaged_elapsed >= PIN_STUCK_TIME_S:
+        # Been facing/pushing at a found ball for too long without ever
+        # completing the approach - probably pinned against the wall.
+        search_state.pop("engaged_since", None)
         search_state["unpin_phase"] = "backing"
         search_state["unpin_start"] = time.time()
         drive.backward()
-        return f"Ball pinned ({approach_elapsed:.1f}s straight) - backing off"
+        return f"Ball pinned ({engaged_elapsed:.1f}s engaged) - backing off"
+
+    if abs(angle) > CENTERED_TOLERANCE_DEG:
+        target = (drive.pose()[2] + angle) % 360
+        drive.rotate_to(target)
+        return f"Ball at {angle:+5.1f} deg - turning"
 
     drive.forward()
     return f"Ball centered ({angle:+5.1f} deg) - approaching"
