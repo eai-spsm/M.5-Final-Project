@@ -14,6 +14,13 @@ WALL_HIGH = np.array([179, 255, 90])
 FLOOR_LOW = np.array([0, 0, 110])     # gray->white tile floor (low saturation)
 FLOOR_HIGH = np.array([179, 60, 255])
 
+# PLACEHOLDER - typical USB webcams are ~60-70 deg horizontal FOV, but this
+# varies a lot by camera. To calibrate: point the camera at two marks a
+# known angle apart (e.g. 30 deg using a protractor/marked floor), measure
+# their pixel x-distance apart in the frame, and solve
+# CAMERA_HFOV_DEG = known_angle * frame_width / pixel_distance_between_marks.
+CAMERA_HFOV_DEG = 60.0
+
 
 def get_masks(frame):
     """HSV-threshold + bitwise ops to separate ball / wall / floor / the
@@ -58,6 +65,15 @@ def ball_center(mask):
     if m["m00"] == 0:
         return None
     return (int(m["m10"] / m["m00"]), int(m["m01"] / m["m00"]))
+
+
+def ball_angle_offset(center_x, frame_width, fov_deg=CAMERA_HFOV_DEG):
+    # How many degrees off-center the ball is, assuming a simple pinhole
+    # model (no lens-distortion correction - fine near the center of the
+    # frame, gets less accurate toward the edges on a wide/fisheye lens).
+    # Positive = ball is to the right of center, negative = left.
+    offset_fraction = (center_x - frame_width / 2) / (frame_width / 2)
+    return offset_fraction * (fov_deg / 2)
 
 
 def build_debug_view(frame):

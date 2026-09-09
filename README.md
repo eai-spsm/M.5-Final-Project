@@ -55,6 +55,7 @@ final/
 ├── main.py              # entry point: start button -> hands off to match logic
 ├── default_control.py   # keyboard control (testing/manual driving)
 ├── cam_control.py        # live camera view over HTTP (no HDMI needed)
+├── ball_chase.py          # demo: turns toward + drives at the ball using perception + guidance
 ├── movement/
 │   ├── __init__.py
 │   └── movement.py       # MecanumDrive class - all motor/GPIO logic lives here
@@ -75,6 +76,7 @@ final/
 - **`default_control.py`** — keyboard control: reads WASD/etc. from the terminal and calls into `GuidedDrive`, printing the tracked position after every move. No motor logic of its own.
 - **`cam_control.py`** — live camera view, and the only thing that actually opens the webcam (one process can hold it open at a time, so this is the single source for every view rather than each perception script grabbing its own capture). Since there's no HDMI monitor on the Pi, `cv2.imshow()` (a desktop window) won't work — this instead serves color, grayscale, and the `perception/color_segment.py` debug view as MJPEG streams over HTTP, viewable from a browser anywhere on the same network, including VS Code's own Simple Browser. See "Viewing the camera" below.
 - **`main.py`** — waits for the start button, then hands off to the rest of the program (currently a TODO — wire in perception + `MecanumDrive`/`GuidedDrive` here for the autonomous match code).
+- **`ball_chase.py`** — first working example of that: opens its own camera capture (can't run at the same time as `cam_control.py` — both want the webcam), finds the ball with `perception.ball_center()`, converts its pixel offset to a real angle with `perception.ball_angle_offset()` (needs `CAMERA_HFOV_DEG` in `perception/color_segment.py` calibrated for the real camera — placeholder for now), and turns toward it with `GuidedDrive.rotate_to()` when off-center by more than `CENTERED_TOLERANCE_DEG`, or drives forward when roughly centered. No wall/goal awareness yet — just ball-seeking.
 - **`perception/`** — camera code: `test.py` runs YOLO detection on the webcam feed (Pi-optimized: smaller inference size, frame skipping), `train.py` trains a model from `perception/data/data.yaml`. `color_segment.py` is a color-based approach for the ball (bright green in testing — not the orange/yellow the rulebook describes, so its HSV range is calibrated against the real ball, not the rules), wall (black), and floor (gray) using HSV masks + bitwise ops — logic only, no camera/server of its own; its debug view is served by `cam_control.py` (see below) since only one process can hold the webcam open at a time.
 - **`docs/`** — the calibration report and the competition rules.
 
@@ -83,6 +85,7 @@ final/
 - `python3 main.py`
 - `python3 default_control.py`
 - `python3 cam_control.py`
+- `sudo python3 ball_chase.py` (needs GPIO access like `default_control.py`; stop it with Ctrl+C — don't run alongside `cam_control.py`, they'll fight over the webcam)
 - `python3 perception/test.py`
 - `python3 perception/train.py`
 
