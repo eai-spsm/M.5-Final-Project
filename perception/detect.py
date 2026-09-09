@@ -7,19 +7,34 @@ from pathlib import Path
 import cv2
 from ultralytics import YOLO
 
+from .color_segment import get_masks, ball_center
+
 MODEL_PATH = Path(__file__).resolve().parent / "data" / "best2.pt"
 CONF_THRESHOLD = 0.5
 IMG_SIZE = 320       # smaller inference size = faster on Pi CPU
 FRAME_WIDTH = 320
 FRAME_HEIGHT = 240
-SKIP_FACTOR = 2       # only run inference on every (SKIP_FACTOR + 1)th frame
+# YOLO only runs on frames where the cheap color check below finds nothing,
+# and even then only every (SKIP_FACTOR + 1)th such frame - the model is by
+# far the most expensive part of this pipeline, so it should be the rare
+# path, not the default one.
+SKIP_FACTOR = 2
 BOX_COLOR = (0, 255, 0)
+COLOR_HIT_BOX = (0, 200, 255)
 JPEG_QUALITY = 60
 PORT = 8082
 
 # No HDMI on this Pi, so cv2.imshow() wouldn't show anything - same MJPEG
 # pattern as cam_control.py instead. Pure detection viewer: no GPIO/motor
 # code, doesn't touch movement or guidance at all.
+#
+# Detection strategy (see docs/PERCEPTION_PLAN.md): try the cheap HSV/
+# bitwise color check (perception.color_segment) every frame first - if it
+# finds a plausible green ball, trust it and skip YOLO entirely for that
+# frame. Only fall back to YOLO when color finds nothing, since it's the
+# rulebook color that isn't guaranteed, not this specific ball's actual
+# color once it's confirmed - and even then, only on the usual frame-skip
+# cadence rather than every single failed frame.
 
 _latest_jpeg = None
 _frame_id = 0
@@ -100,8 +115,8 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"Detection view at http://<pi-ip-address>:{PORT}/  (Ctrl+C to stop)")
 
-    frame_count = 0
-    last_boxes = []
+    yolo_frame_count = 0
+    last_yolo_boxes = []
     last_detected = set()
 
     try:
@@ -110,32 +125,47 @@ def main():
             if not ret:
                 continue
 
-            if frame_count % (SKIP_FACTOR + 1) == 0:
-                try:
-                    results = model(frame, conf=CONF_THRESHOLD, imgsz=IMG_SIZE, verbose=False)
-                    boxes = results[0].boxes
+            masks = get_masks(frame)
+            center = ball_center(masks["ball"])
 
-                    detected = set()
-                    last_boxes = []
-                    for box in boxes:
-                        cls_id = int(box.cls[0])
-                        name = model.names[cls_id]
-                        conf = float(box.conf[0])
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        last_boxes.append((x1, y1, x2, y2, f"{name} {conf:.2f}"))
-                        detected.add(name)
-                        if name not in last_detected:
-                            print(f"Detected {name} ({conf:.2f})")
-                    last_detected = detected
-                except Exception as frame_err:
-                    print(f"Error processing frame: {frame_err}")
+            if center is not None:
+                # Fast path: color found it, no need for YOLO this frame.
+                cv2.circle(frame, center, 10, COLOR_HIT_BOX, 2)
+                cv2.putText(frame, "ball (color)", (center[0] + 12, center[1]),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_HIT_BOX, 1)
+                if "ball" not in last_detected:
+                    print("Detected ball (color)")
+                last_detected = {"ball"}
+                last_yolo_boxes = []
+            else:
+                # Fallback path: color found nothing this frame - run the
+                # heavier model, still rate-limited by SKIP_FACTOR.
+                if yolo_frame_count % (SKIP_FACTOR + 1) == 0:
+                    try:
+                        results = model(frame, conf=CONF_THRESHOLD, imgsz=IMG_SIZE, verbose=False)
+                        boxes = results[0].boxes
 
-            for x1, y1, x2, y2, label in last_boxes:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), BOX_COLOR, 1)
-                cv2.putText(frame, label, (x1, max(y1 - 5, 0)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, BOX_COLOR, 1)
+                        detected = set()
+                        last_yolo_boxes = []
+                        for box in boxes:
+                            cls_id = int(box.cls[0])
+                            name = model.names[cls_id]
+                            conf = float(box.conf[0])
+                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+                            last_yolo_boxes.append((x1, y1, x2, y2, f"{name} {conf:.2f}"))
+                            detected.add(name)
+                            if name not in last_detected:
+                                print(f"Detected {name} ({conf:.2f}) [YOLO]")
+                        last_detected = detected
+                    except Exception as frame_err:
+                        print(f"Error processing frame: {frame_err}")
+                yolo_frame_count += 1
 
-            frame_count += 1
+                for x1, y1, x2, y2, label in last_yolo_boxes:
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), BOX_COLOR, 1)
+                    cv2.putText(frame, label, (x1, max(y1 - 5, 0)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, BOX_COLOR, 1)
+
             _publish(frame)
 
     except KeyboardInterrupt:
