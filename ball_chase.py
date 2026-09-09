@@ -85,16 +85,30 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
         search_state["searching"] = False
         return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
 
+    center = ball_center(masks["ball"])
+    angle = ball_angle_offset(center[0], frame.shape[1]) if center is not None else None
+    if angle is not None:
+        # Remembered even when we're about to evade instead of chase, so an
+        # evade triggered the moment the ball gets blocked can still evade
+        # toward the side it was last seen on.
+        search_state["last_ball_angle"] = angle
+
     distance = drive.get_distance()
     if distance is not None and distance < EVADE_DISTANCE_CM:
         # Not the wall (that's already handled above) - something else is
-        # right in front of us. Strafe around it rather than plowing
-        # forward or spinning in place.
-        drive.strafe_right(speed=EVADE_SPEED)
+        # right in front of us, most likely between us and the ball. Go
+        # around whichever side the ball actually is (or was last seen
+        # on, if it's hidden behind whatever's blocking us right now)
+        # instead of blindly picking a direction.
+        last_angle = search_state.get("last_ball_angle", 0)
+        if last_angle < 0:
+            drive.strafe_left(speed=EVADE_SPEED)
+            direction = "left"
+        else:
+            drive.strafe_right(speed=EVADE_SPEED)
+            direction = "right"
         search_state["searching"] = False
-        return f"Obstruction at {distance:.0f}cm - evading"
-
-    center = ball_center(masks["ball"])
+        return f"Obstruction at {distance:.0f}cm - evading {direction} toward ball"
 
     if center is None:
         heading = drive.pose()[2]
@@ -122,7 +136,6 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
 
     search_state["searching"] = False
 
-    angle = ball_angle_offset(center[0], frame.shape[1])
     if abs(angle) > CENTERED_TOLERANCE_DEG:
         target = (drive.pose()[2] + angle) % 360
         drive.rotate_to(target)
