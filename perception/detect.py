@@ -111,6 +111,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 
+    socketserver.ThreadingTCPServer.allow_reuse_address = True  # avoid "Address already in use" on a quick restart
     server = socketserver.ThreadingTCPServer(("0.0.0.0", PORT), _StreamingHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"Detection view at http://<pi-ip-address>:{PORT}/  (Ctrl+C to stop)")

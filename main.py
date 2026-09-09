@@ -117,6 +117,7 @@ def main():
 
         on_frame = None
         if SERVE_LIVE_VIEW:
+            socketserver.ThreadingTCPServer.allow_reuse_address = True  # avoid "Address already in use" on a quick restart
             server = socketserver.ThreadingTCPServer(("0.0.0.0", LIVE_VIEW_PORT), _StreamingHandler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             print(f"Live view at http://<pi-ip-address>:{LIVE_VIEW_PORT}/")

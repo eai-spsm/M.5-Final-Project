@@ -142,6 +142,7 @@ def main():
 
     threading.Thread(target=capture_loop, args=(cap,), daemon=True).start()
 
+    socketserver.ThreadingTCPServer.allow_reuse_address = True  # avoid "Address already in use" on a quick restart
     with socketserver.ThreadingTCPServer(("0.0.0.0", PORT), StreamingHandler) as server:
         print(f"Live view at http://<pi-ip-address>:{PORT}/  (Ctrl+C to stop)")
         print("In VS Code: Ctrl+Shift+P -> 'Browser: Open Integrated Browser' -> paste that URL.")
