@@ -1,4 +1,5 @@
 import http.server
+import signal
 import socket
 import socketserver
 import threading
@@ -10,6 +11,10 @@ import RPi.GPIO as GPIO
 from guidance import GuidedDrive
 from ball_chase import open_camera, chase_loop
 from perception import build_debug_view
+
+# Keep running if the SSH session drops - without this, losing the
+# connection sends SIGHUP and the default reaction is to just exit.
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
 # Start button (pulled up, wired to GND when pressed)
 BTN_PIN = 21
@@ -106,6 +111,10 @@ def main():
         if cap is None:
             return
 
+        def _track_cap(new_cap):
+            nonlocal cap
+            cap = new_cap
+
         on_frame = None
         if SERVE_LIVE_VIEW:
             server = socketserver.ThreadingTCPServer(("0.0.0.0", LIVE_VIEW_PORT), _StreamingHandler)
@@ -114,7 +123,7 @@ def main():
             on_frame = _on_frame
 
         print("Chasing the ball. Ctrl+C to stop.")
-        chase_loop(cap, drive, on_frame=on_frame)
+        chase_loop(cap, drive, on_frame=on_frame, on_reconnect=_track_cap)
 
     except KeyboardInterrupt:
         print("\nProgram stopped by user.")
