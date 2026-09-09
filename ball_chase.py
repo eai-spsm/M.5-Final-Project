@@ -43,6 +43,18 @@ GOAL_DWELL_LIMIT_S = 5.0
 # (or it's not legible) to say for certain - see guess_goal_ownership().
 OPPONENT_GOAL_HEADING_DEG = 0.0
 
+# If the ball's been dead-centered and we've been driving straight at it
+# continuously for this long without ever completing the approach, it's
+# very likely pinned against the wall (or something else) rather than
+# genuinely still closing distance from far away - back off and come at
+# it from an angle instead of pushing uselessly straight into whatever's
+# behind it. Not gated on the ultrasonic since a small ball flush against
+# a flat wall may not reliably register as "close" on its own.
+PIN_STUCK_TIME_S = 3.0
+UNPIN_BACKUP_S = 1.0
+UNPIN_STRAFE_S = 1.0
+UNPIN_SPEED = 45
+
 # After spinning this many degrees without finding the ball, assume it's
 # not visible from here (behind something, out of view) and nudge forward
 # before continuing the search, instead of spinning in the same spot
@@ -110,6 +122,7 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
     if wall_fraction >= WALL_COVERAGE_THRESHOLD:
         drive.backward()
         search_state["searching"] = False
+        search_state.pop("approaching_since", None)
         return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
 
     distance = drive.get_distance()
@@ -125,12 +138,38 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
         if "goal_area_since" not in search_state:
             search_state["goal_area_since"] = time.time()
         dwell = time.time() - search_state["goal_area_since"]
+        search_state["searching"] = False
+        search_state.pop("approaching_since", None)
         if dwell >= GOAL_DWELL_LIMIT_S:
             drive.backward()
-            search_state["searching"] = False
-            return f"In goal area {dwell:.1f}s - leaving"
+            return f"In goal area {dwell:.1f}s - backing out"
+        # Hold here immediately rather than continuing to chase the ball
+        # in - GOAL_DWELL_LIMIT_S is a safety net for if it ends up here
+        # anyway, not permission to drive in during those first few
+        # seconds.
+        drive.stop()
+        return f"Near goal ({dwell:.1f}s) - holding, not entering"
     else:
         search_state.pop("goal_area_since", None)
+
+    # Continue an in-progress unpin maneuver before anything below gets a
+    # chance to re-evaluate the ball position and interrupt it early.
+    unpin_phase = search_state.get("unpin_phase")
+    if unpin_phase is not None:
+        elapsed = time.time() - search_state["unpin_start"]
+        if unpin_phase == "backing":
+            if elapsed < UNPIN_BACKUP_S:
+                drive.backward()
+                return f"Ball pinned - backing off ({elapsed:.1f}s)"
+            search_state["unpin_phase"] = "strafing"
+            search_state["unpin_start"] = time.time()
+            elapsed = 0.0
+        drive.strafe_right(speed=UNPIN_SPEED)
+        if elapsed < UNPIN_STRAFE_S:
+            return f"Ball pinned - repositioning ({elapsed:.1f}s)"
+        search_state.pop("unpin_phase", None)
+        search_state.pop("unpin_start", None)
+        return "Unpin complete - resuming chase"
 
     center = ball_center(masks["ball"])
     angle = ball_angle_offset(center[0], frame.shape[1]) if center is not None else None
@@ -154,9 +193,11 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
             drive.strafe_right(speed=EVADE_SPEED)
             direction = "right"
         search_state["searching"] = False
+        search_state.pop("approaching_since", None)
         return f"Obstruction at {distance:.0f}cm - evading {direction} toward ball"
 
     if center is None:
+        search_state.pop("approaching_since", None)
         heading = drive.pose()[2]
         if not search_state.get("searching"):
             search_state["searching"] = True
@@ -183,12 +224,26 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
     search_state["searching"] = False
 
     if abs(angle) > CENTERED_TOLERANCE_DEG:
+        search_state.pop("approaching_since", None)
         target = (drive.pose()[2] + angle) % 360
         drive.rotate_to(target)
         return f"Ball at {angle:+5.1f} deg - turning"
-    else:
-        drive.forward()
-        return f"Ball centered ({angle:+5.1f} deg) - approaching"
+
+    if "approaching_since" not in search_state:
+        search_state["approaching_since"] = time.time()
+    approach_elapsed = time.time() - search_state["approaching_since"]
+
+    if approach_elapsed >= PIN_STUCK_TIME_S:
+        # Been driving straight at a centered ball for too long without
+        # ever completing the approach - probably pinned against the wall.
+        search_state.pop("approaching_since", None)
+        search_state["unpin_phase"] = "backing"
+        search_state["unpin_start"] = time.time()
+        drive.backward()
+        return f"Ball pinned ({approach_elapsed:.1f}s straight) - backing off"
+
+    drive.forward()
+    return f"Ball centered ({angle:+5.1f} deg) - approaching"
 
 
 def _safe_print(*args, **kwargs):
