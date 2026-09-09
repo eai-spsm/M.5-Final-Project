@@ -40,6 +40,16 @@ GOAL_AREA_DISTANCE_CM = 30
 GOAL_GAP_CLOSE_WIDTH_FRACTION = 0.5
 GOAL_DWELL_LIMIT_S = 5.0
 
+# find_goal_gap() reads one frame at a time, so lighting/texture/segment-
+# joint noise in the wall mask can occasionally look like a gap for a
+# frame or two even when facing plain wall. A real opening stays roughly
+# where it is across consecutive frames; noise doesn't - so a raw
+# per-frame gap only gets trusted (see _confirmed_goal_gap()) once it's
+# been seen in this many frames in a row, staying within
+# GOAL_GAP_POSITION_TOLERANCE_PX of where it was last seen.
+GOAL_GAP_CONFIRM_FRAMES = 5
+GOAL_GAP_POSITION_TOLERANCE_PX = 40
+
 # PLACEHOLDER - confirm against the real field/starting setup. World-frame
 # heading (Navigator's convention: 0 = wherever the robot was facing at
 # the start) that the OPPONENT's goal is roughly in the direction of. Used
@@ -71,6 +81,30 @@ SEARCH_FULL_SWEEP_DEG = 350
 # disconnected (not just a one-off dropped frame) and try to reopen it.
 CAMERA_RECONNECT_AFTER = 20
 CAMERA_RECONNECT_RETRY_DELAY = 1.0
+
+
+def _confirmed_goal_gap(raw_gap, search_state):
+    # Only trust find_goal_gap()'s raw per-frame result once it's held up
+    # for GOAL_GAP_CONFIRM_FRAMES in a row at roughly the same x position -
+    # single-frame wall-mask noise (lighting, texture, a segment joint)
+    # can look like a gap briefly even when facing plain wall; a real
+    # opening doesn't flicker like that. Returns raw_gap once confirmed,
+    # else None.
+    if raw_gap is None:
+        search_state["goal_gap_streak"] = 0
+        search_state.pop("goal_gap_last_x", None)
+        return None
+
+    last_x = search_state.get("goal_gap_last_x")
+    if last_x is not None and abs(raw_gap["center_x"] - last_x) <= GOAL_GAP_POSITION_TOLERANCE_PX:
+        search_state["goal_gap_streak"] = search_state.get("goal_gap_streak", 0) + 1
+    else:
+        search_state["goal_gap_streak"] = 1  # first sighting, or jumped too far to be the same gap
+    search_state["goal_gap_last_x"] = raw_gap["center_x"]
+
+    if search_state["goal_gap_streak"] >= GOAL_GAP_CONFIRM_FRAMES:
+        return raw_gap
+    return None
 
 
 def guess_goal_ownership(current_heading_deg, gap_bearing_deg, opponent_goal_heading_deg=OPPONENT_GOAL_HEADING_DEG):
@@ -138,7 +172,7 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
     # close to one and force a retreat past GOAL_DWELL_LIMIT_S. Doesn't
     # need to know which goal (see guess_goal_ownership() for that,
     # used elsewhere for not shooting into our own goal).
-    gap = find_goal_gap(masks["wall"])
+    gap = _confirmed_goal_gap(find_goal_gap(masks["wall"]), search_state)
     close_by_ultrasonic = distance is not None and distance < GOAL_AREA_DISTANCE_CM
     close_by_width = gap is not None and gap["width_px"] >= GOAL_GAP_CLOSE_WIDTH_FRACTION * frame.shape[1]
     near_goal = gap is not None and (close_by_ultrasonic or close_by_width)
@@ -194,12 +228,17 @@ def chase_step(cap, drive, on_frame=None, search_state=None):
         if gap_left <= center[0] <= gap_right:
             # The ball itself is sitting inside a detected goal opening -
             # don't chase it in, regardless of how far WE currently are
-            # from the gap (the near_goal check above only fires once we
-            # ourselves are close).
-            drive.stop()
+            # from the gap. This is only reached when near_goal (above)
+            # was False, i.e. our own proximity check didn't think we
+            # were close - but that check can have false negatives, so
+            # back OUT here rather than just stop: if we're genuinely
+            # still far, backing up costs almost nothing; if our
+            # proximity check missed that we're actually in the goal
+            # too, stopping in place wouldn't have gotten us back out.
+            drive.backward()
             search_state["searching"] = False
             search_state.pop("engaged_since", None)
-            return "Ball is in the goal opening - not following"
+            return "Ball is in the goal opening - backing out"
 
     if distance is not None and distance < EVADE_DISTANCE_CM:
         # Not the wall (that's already handled above) - something else is
