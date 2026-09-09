@@ -17,6 +17,17 @@ CENTERED_TOLERANCE_DEG = 8
 # normal turn so a frame doesn't blur past the ball and miss it.
 SEARCH_SPEED = 40
 
+# If the wall mask covers this much of the frame, we're facing straight
+# into it (or nearly touching it) - back up instead of trying to chase
+# whatever the ball logic thinks it sees.
+WALL_COVERAGE_THRESHOLD = 0.80
+
+# After spinning this many degrees without finding the ball, assume it's
+# not visible from here (behind something, out of view) and nudge forward
+# before continuing the search, instead of spinning in the same spot
+# forever. Slightly under 360 to account for tracking imprecision.
+SEARCH_FULL_SWEEP_DEG = 350
+
 # If the camera read fails this many times in a row, assume it's actually
 # disconnected (not just a one-off dropped frame) and try to reopen it.
 CAMERA_RECONNECT_AFTER = 20
@@ -35,14 +46,22 @@ def open_camera():
     return cap
 
 
-def chase_step(cap, drive, on_frame=None):
+def chase_step(cap, drive, on_frame=None, search_state=None):
     # Reads one frame and reacts to it: turn toward the ball, drive at it
-    # once centered, or stop if it's not visible. Returns a short status
-    # string for the caller to display.
+    # once centered, back up if we're right up against the wall, or search
+    # if it's not visible. Returns a short status string for the caller to
+    # display.
     #
     # on_frame, if given, is called with (frame, masks) for every frame -
     # e.g. to push a live view somewhere - without a second camera read
     # (only one process/reader can hold a webcam open at a time).
+    #
+    # search_state, if given, is a dict chase_loop persists across calls so
+    # the search sweep can track how far it's turned. Without it (e.g.
+    # called standalone/in a test) each call starts a fresh sweep.
+    if search_state is None:
+        search_state = {}
+
     ret, frame = cap.read()
     if not ret:
         # Don't leave the last command running blind if the camera drops.
@@ -53,14 +72,39 @@ def chase_step(cap, drive, on_frame=None):
     if on_frame is not None:
         on_frame(frame, masks)
 
+    wall_fraction = float((masks["wall"] > 0).mean())
+    if wall_fraction >= WALL_COVERAGE_THRESHOLD:
+        drive.backward()
+        search_state["searching"] = False
+        return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
+
     center = ball_center(masks["ball"])
 
     if center is None:
-        # Not found - spin in place (continues however far around it takes,
-        # "360" isn't tracked/enforced, it just keeps going until a frame
-        # finds the ball) rather than sitting stopped and blind.
+        heading = drive.pose()[2]
+        if not search_state.get("searching"):
+            search_state["searching"] = True
+            search_state["swept_deg"] = 0.0
+        else:
+            # Accumulate the actual step-to-step rotation rather than
+            # comparing against a fixed start heading - a single mod-360
+            # comparison can skip right past the threshold if a step
+            # happens to cross the 0/360 wrap between polls.
+            delta = (heading - search_state["last_heading"] + 180) % 360 - 180
+            search_state["swept_deg"] += abs(delta)
+        search_state["last_heading"] = heading
+
         drive.rotate_right(speed=SEARCH_SPEED)
-        return "Searching (spinning)..."
+        swept = search_state["swept_deg"]
+
+        if swept >= SEARCH_FULL_SWEEP_DEG:
+            drive.forward(speed=SEARCH_SPEED)
+            search_state["searching"] = False  # restarts the sweep next call
+            return "Full 360 sweep, no ball found - repositioning..."
+
+        return f"Searching (spinning, {swept:.0f}/360 deg)..."
+
+    search_state["searching"] = False
 
     angle = ball_angle_offset(center[0], frame.shape[1])
     if abs(angle) > CENTERED_TOLERANCE_DEG:
@@ -93,8 +137,9 @@ def chase_loop(cap, drive, on_frame=None, on_reconnect=None):
     # for cleanup) would otherwise go stale, since reassigning the local
     # `cap` here doesn't change what the caller is holding.
     consecutive_failures = 0
+    search_state = {}
     while True:
-        status = chase_step(cap, drive, on_frame=on_frame)
+        status = chase_step(cap, drive, on_frame=on_frame, search_state=search_state)
 
         if status == "Camera read failed":
             consecutive_failures += 1

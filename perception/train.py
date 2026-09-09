@@ -16,7 +16,7 @@ def main():
     # 3. Train the model
     results = model.train(
         data=data_path,  # Path to dataset configuration file
-        epochs=100,  # Number of training epochs
+        epochs=200,  # Number of training epochs
         imgsz=640,  # Image resolution (pixels)
         batch=16,  # Batch size (reduce to 8 or 4 if you run out of GPU memory)
         device=0,  # GPU device ID (use 'cpu' if you don't have an NVIDIA GPU)
