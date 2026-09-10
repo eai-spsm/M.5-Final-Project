@@ -18,7 +18,7 @@ TARGET_FPS = 12
 PORT = 8080
 
 # Latest frame (color + grayscale + segmentation debug) + a version
-# counter, shared between the capture thread and any number of viewers.
+# counter, shared between the cappture thread and any number of viewers.
 # One cv2.VideoCapture read per cycle feeds all three views, since most
 # webcams only allow one process to hold the device open at a time -
 # running cam_control.py and a separate segmentation script at once would

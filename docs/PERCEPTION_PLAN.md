@@ -1,4 +1,18 @@
-# Perception Plan
+# Perception Plan (historical — superseded)
+
+**This plan's YOLO/MediaPipe/ArUco approach was built, tried, and then
+removed.** Kept here for context on the reasoning at the time, but it does
+NOT describe current behavior — see the README's "Why no YOLO" section and
+`docs/CALIBRATION_REPORT.md`'s power-supply section for what actually
+shipped and why. Short version: plain HSV color detection for the ball
+(once restricted to the lower part of the frame to cut background noise)
+turned out both faster and more reliable in practice than YOLO on this
+Pi's CPU, and running a model at all adds sustained CPU/power load that's
+actively bad given the shared-battery-rail undervoltage issue found during
+testing. The only perception module in the codebase now is
+`perception/color_segment.py`.
+
+---
 
 How the robot will detect the ball, walls, allies, opponents, the goal, and
 the forbidden zone — and why each target uses a different method.

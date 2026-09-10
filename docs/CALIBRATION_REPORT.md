@@ -104,3 +104,55 @@ being duplicated or copy-pasted between them. Every movement method
 override the default duty cycle for that call — e.g. `drive.forward(speed=30)`
 for a slow final approach to the ball vs. the default speed for
 repositioning.
+
+## Power supply / undervoltage brownouts (found during autonomous testing)
+
+Running `goalkeeper.py`/`main.py` over SSH, the connection would drop as
+soon as the robot made its first move — sometimes before it even finished
+one command. Confirmed via the Pi's own firmware, not just a guess:
+
+```
+$ vcgencmd get_throttled
+throttled=0x50000        # bit 16 (undervoltage HAS occurred) + bit 18 (throttling HAS occurred)
+$ dmesg | grep -i under
+[   11.870204] hwmon hwmon1: Undervoltage detected!
+```
+
+**Root cause, in two parts:**
+
+1. **No braking between direction reversals.** `set_wheels()` was flipping
+   the H-bridge direction pins directly - going from full-speed-forward
+   straight to full-speed-backward (or strafe-left to strafe-right) with
+   zero pause spikes current/back-EMF across all 4 motors at once.
+2. **Bigger factor: any motor starting from a dead stop draws a stall/inrush
+   current well above its running current** - this is what was actually
+   dropping the connection even on the very *first* movement command
+   (before any reversal could even happen), which ruled out (1) as the
+   full explanation. The robot's 2S lithium pack is shared with the Pi's
+   5V supply, so that inrush sags the same rail the Pi is drawing from.
+
+**Fixes applied (`movement/movement.py`):**
+
+- `MecanumDrive` now tracks each wheel's last commanded direction
+  (`_last_direction`). `set_wheels()` only engages the soft-start ramp
+  (`_soft_start()` - `SOFT_START_STEPS` steps, ~`SOFT_START_STEP_DELAY_S`
+  each, starting from `SOFT_START_MIN_DUTY`) when a wheel is actually
+  starting from stopped or reversing; a wheel already spinning the same
+  direction just gets its duty updated instantly, so normal continuous
+  driving (called every frame from the control loop) isn't slowed down.
+- Application-level reversal guards (`_safe_move`/`_stop` helpers) were
+  also added in `main.py` and `goalkeeper.py`, forcing one full stop
+  before any commanded reversal - redundant with the low-level ramp now,
+  but left in since it costs nothing and documents intent at the call
+  site.
+
+**This is a mitigation, not a fix.** Softening the ramp reduces the size
+of the current spike, but it can't fix a power rail that's already
+marginal at normal load. **The real fix is a separate power supply for
+the Pi**, not sharing the motors' battery - see the README's power-supply
+warning. If a second supply genuinely isn't available: add a bulk
+capacitor (1000-4700µF) across the motor driver boards' power input so
+the inrush is supplied locally instead of pulled through the battery/
+wiring, and wire the Pi's 5V regulator input directly to the battery
+terminals rather than downstream of the driver boards' terminals (reduces
+shared-wire voltage coupling between the two loads).

@@ -86,6 +86,18 @@ def ball_angle_offset(center_x, frame_width, fov_deg=CAMERA_HFOV_DEG):
 # here", which also fires on plain perspective/lighting variation.
 GOAL_GAP_MIN_WIDTH_PX = 30  # ignore narrow single-column noise/joints
 
+# The field border is an octagon, not a straight wall - at a beveled
+# corner, two wall segments meet at an angle and their joint bracket can
+# LOCALLY read as "1 run" too (bands merging into one solid block from
+# that viewing angle), false-matching the run-count check above. The real
+# difference: a goal is just a thin crossbar with much LESS total wall
+# material than normal wall, while a corner joint typically has
+# comparable or MORE (reinforcement brackets, overlapping segments) -
+# just arranged into one block instead of two clean bands. This ratio
+# rejects a candidate whose columns aren't meaningfully less dense than
+# the surrounding normal (2-band) wall.
+GOAL_GAP_MAX_DENSITY_RATIO = 0.6
+
 
 def _vertical_run_count(column):
     # How many separate contiguous "on" (wall) runs going down this one
@@ -100,13 +112,16 @@ def _vertical_run_count(column):
     return runs
 
 
-def find_goal_gap(wall_mask, min_width_px=GOAL_GAP_MIN_WIDTH_PX):
+def find_goal_gap(wall_mask, min_width_px=GOAL_GAP_MIN_WIDTH_PX, max_density_ratio=GOAL_GAP_MAX_DENSITY_RATIO):
     """Looks for a goal-width stretch of columns that have only ONE
     vertical black band (crossbar-only) instead of the normal wall's two
-    (lower rail + upper rail with a gap between). Returns
+    (lower rail + upper rail with a gap between), AND meaningfully less
+    total wall material than the surrounding normal wall (rejects a
+    corner joint that also happens to read as "1 run" locally). Returns
     {"center_x", "width_px"} for the widest qualifying stretch, or None.
     """
     height, width = wall_mask.shape
+    col_counts = (wall_mask > 0).sum(axis=0).astype(float)
     is_single_bar = np.zeros(width, dtype=bool)
     for x in range(width):
         column = wall_mask[:, x]
@@ -134,6 +149,19 @@ def find_goal_gap(wall_mask, min_width_px=GOAL_GAP_MIN_WIDTH_PX):
 
     if best_start is None or best_len < min_width_px:
         return None
+
+    # Density check: compare the candidate's average wall-pixel count per
+    # column against the baseline (2-band, i.e. NOT single-bar) columns
+    # elsewhere in the frame. A real goal has much less material than
+    # normal wall; a corner joint reading as "1 run" typically doesn't.
+    candidate_cols = col_counts[best_start:best_start + best_len]
+    baseline_cols = col_counts[~is_single_bar]
+    baseline_cols = baseline_cols[baseline_cols > 0]
+    if baseline_cols.size > 0:
+        baseline_density = np.median(baseline_cols)
+        candidate_density = np.mean(candidate_cols)
+        if candidate_density > baseline_density * max_density_ratio:
+            return None  # too much material for a real goal - likely a corner joint
 
     return {"center_x": best_start + best_len / 2, "width_px": best_len}
 

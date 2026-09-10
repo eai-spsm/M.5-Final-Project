@@ -42,6 +42,21 @@ WHEEL_INVERT = {"fl": False, "fr": False, "rl": False, "rr": True}
 # some motors, higher tends to reintroduce the same-board electrical glitch.
 WHEEL_TRIM = {"fl": 0.9, "fr": 0.9, "rl": 1.0, "rr": 1.0}
 
+# A motor starting from a dead stop draws far more current (stall/inrush
+# current) than one already spinning - jumping straight to full duty cycle
+# on a cold wheel was sagging the shared battery rail enough to brown out
+# the Pi (confirmed via `vcgencmd get_throttled` / dmesg "Undervoltage
+# detected!"), which drops the SSH session. With no separate power supply
+# available for the Pi, softening that edge in code is the main lever
+# left: ramp duty cycle up over SOFT_START_STEPS steps instead of setting
+# it in one jump, but ONLY for a wheel that's actually starting from
+# stopped/reversing (see set_wheels) - a wheel already spinning the same
+# direction just gets its duty updated directly, so repeated per-frame
+# commands at a steady speed aren't slowed down by this.
+SOFT_START_STEPS = 5
+SOFT_START_STEP_DELAY_S = 0.03  # ~150ms total ramp
+SOFT_START_MIN_DUTY = 20  # below MecanumDrive's practical minimum anyway
+
 # Each wheel is driven independently so we can strafe/rotate, not just go
 # left/right. FL = IN1/IN2 (ENA_L), RL = IN3/IN4 (ENB_L), FR = IN7/IN8
 # (ENB_R), RR = IN5/IN6 (ENA_R). Left and right boards each have their own,
@@ -88,6 +103,11 @@ class MecanumDrive:
             "rl": (IN3, IN4),
             "rr": (IN5, IN6),
         }
+        # Tracks each wheel's last commanded direction (1/-1/0) so
+        # set_wheels can tell a fresh start/reversal (needs a soft-start
+        # ramp) apart from a repeated per-frame command at a speed it's
+        # already spinning at (doesn't).
+        self._last_direction = {"fl": 0, "fr": 0, "rl": 0, "rr": 0}
 
     # -- low-level -----------------------------------------------------
 
@@ -106,17 +126,50 @@ class MecanumDrive:
             speed = self.speed
         wheels = {"fl": fl, "fr": fr, "rl": rl, "rr": rr}
 
+        ramp_targets = {}  # name -> target duty, for wheels needing a soft start
         for name, direction in wheels.items():
             pin_a, pin_b = self._pins[name]
             if direction == 0:
                 self._wheel_stop(pin_a, pin_b)
                 self._pwm[name].ChangeDutyCycle(0)
-            else:
-                if WHEEL_INVERT[name]:
-                    direction = -direction
-                self._wheel(pin_a, pin_b, forward=direction > 0)
-                duty = min(100, max(0, speed * WHEEL_TRIM[name]))
+                self._last_direction[name] = 0
+                continue
+
+            was_moving_same_way = self._last_direction[name] == direction
+            self._last_direction[name] = direction
+
+            if WHEEL_INVERT[name]:
+                direction = -direction
+            self._wheel(pin_a, pin_b, forward=direction > 0)
+            duty = min(100, max(0, speed * WHEEL_TRIM[name]))
+
+            if was_moving_same_way:
+                # Already spinning this way - just update duty, no ramp.
+                # Keeps repeated per-frame commands at a steady speed from
+                # being slowed down by a ramp that only matters for a cold
+                # start/reversal.
                 self._pwm[name].ChangeDutyCycle(duty)
+            else:
+                ramp_targets[name] = duty
+
+        if ramp_targets:
+            self._soft_start(ramp_targets)
+
+    def _soft_start(self, targets):
+        # Ramps each wheel in `targets` (name -> target duty) from
+        # SOFT_START_MIN_DUTY up to its target over SOFT_START_STEPS steps,
+        # instead of jumping straight there - see the SOFT_START_* comment
+        # above WHEEL_TRIM for why (tapers the inrush current of a motor
+        # starting from rest, which was enough to brown out the shared
+        # battery rail the Pi's power is also drawn from).
+        for step in range(1, SOFT_START_STEPS + 1):
+            frac = step / SOFT_START_STEPS
+            for name, target_duty in targets.items():
+                start_duty = min(SOFT_START_MIN_DUTY, target_duty)
+                ramped = start_duty + (target_duty - start_duty) * frac
+                self._pwm[name].ChangeDutyCycle(max(0, min(100, ramped)))
+            if step < SOFT_START_STEPS:
+                time.sleep(SOFT_START_STEP_DELAY_S)
 
     def test_wheel(self, name):
         # Spins one wheel forward in isolation, for calibrating WHEEL_INVERT
