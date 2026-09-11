@@ -38,18 +38,19 @@ BALL_ROI_Y_START = int(FRAME_HEIGHT * 0.35)
 # during strafe was - RL/RR (trim 1.0) got the full duty and spun, FL/FR
 # didn't clear the stall threshold.
 #
-# Bumped again (60 -> 65), deliberately PAST the ~60 effective-duty
-# ceiling documented in CALIBRATION_REPORT.md as where the same-board-
-# opposite-channel glitch (a wheel visibly flipping direction mid-hold)
-# starts reappearing - strafing is the one command that drives both
-# channels on the SAME board in OPPOSITE directions (forward/backward
-# always keep a board's two channels in sync, so they don't have this
-# risk). RL/RR (trim 1.0) now sit at 65 effective duty, 5 over that
-# ceiling - watch for the glitch on real hardware; if it reappears, that's
-# confirmation this needs to come back down, not a surprise.
+# Was pushed 60 -> 65 -> 75 -> 85 in one session without ever confirming
+# on real hardware whether the same-board-opposite-channel glitch (a wheel
+# visibly flipping direction mid-hold, see CALIBRATION_REPORT.md) or a
+# brownout (movement/movement.py's soft-start exists because current
+# spikes were already dropping the Pi at lower speeds) showed up at any
+# of those steps. Reset back down to the documented safe ceiling to
+# restart that process properly: test at 60 first, confirm it's clean on
+# the actual robot, and only then step up in small increments (e.g. +5),
+# re-testing after each step, rather than jumping straight to a high
+# number again.
 ZONE_LEFT_FRACTION = 1 / 3
 ZONE_RIGHT_FRACTION = 2 / 3
-STRAFE_SPEED = 65
+STRAFE_SPEED = 60
 
 # "Close" is read straight off the ROI: once the ball's centroid is this
 # far down the frame, it's near enough to hit. PLACEHOLDER - tune against
@@ -107,6 +108,26 @@ MAX_LAUNCH_DURATION_S = 3.5
 # guarantees a real, visible push every time regardless of how fast
 # contact gets detected.
 MIN_LAUNCH_DURATION_S = 0.3
+
+# If the ball genuinely vanishes mid-ram (missed it, it deflected away) and
+# was never seen large enough to count as contact, don't keep ramming blind
+# all the way to MAX_LAUNCH_DURATION_S - abort the forward push once it's
+# been gone for this long and drop straight into the normal time-symmetric
+# "returning" phase (using whatever forward duration had already elapsed),
+# which puts the robot back at roughly its pre-ram position instead of
+# overshooting into empty space. Not zero - a single dropped/flickered
+# frame shouldn't abort a real ram, same reasoning as the near-field-motion
+# and lost-track grace periods elsewhere.
+LOST_ABORT_GRACE_S = 0.4
+
+# Once centered (heading locked onto the ball) but not yet close enough to
+# trigger the ram, approach at a speed that ramps up with how close the
+# ball already is (its Y position toward CLOSE_Y_THRESHOLD) instead of
+# just holding still and waiting - a ball that's still approaching from
+# far off gets a gentle nudge forward, and speed climbs toward LAUNCH_SPEED
+# as it nears the ram trigger, rather than sitting still then jumping
+# straight to max speed the instant CLOSE_Y_THRESHOLD is crossed.
+APPROACH_MIN_SPEED = 45
 
 # If the wall mask covers this much of the frame, back up regardless of
 # what the ball's doing or mid-maneuver - basic collision safety, same as
@@ -223,6 +244,17 @@ def _ball_roi(mask):
     roi = mask.copy()
     roi[:BALL_ROI_Y_START, :] = 0
     return roi
+
+
+def _heading_diff(drive):
+    # Signed degrees off HOME_HEADING_DEG, wrapped to -180..180. Used to
+    # make sure the robot is actually squared up before ramming forward -
+    # search bursts already self-correct back toward home heading, but
+    # nothing previously checked this right before a launch, so a launch
+    # fired while still rotated off-heading could deflect the ball
+    # sideways or back toward our own goal instead of straight out.
+    heading = drive.pose()[2]
+    return (heading - HOME_HEADING_DEG + 180) % 360 - 180
 
 
 # The robot chassis is a distinctive medium/royal blue 3D-printed frame -
@@ -569,14 +601,26 @@ def defend_step(cap, drive, search_state=None):
             large_enough = ball_area >= CONTACT_AREA_FRACTION * frame_area
             if center is not None and large_enough:
                 search_state["launch_max_area_seen"] = True
+            if center is not None:
+                search_state["launch_last_seen"] = time.time()
             contact = (center is not None and large_enough) or (
                 center is None and search_state.get("launch_max_area_seen", False)
             )
+            # If the ball's been gone (not a single-frame flicker) for
+            # LOST_ABORT_GRACE_S and was never seen large, it's genuinely
+            # lost, not just out of the ROI at range while still tracked -
+            # stop ramming blind toward nothing and return early instead of
+            # continuing to MAX_LAUNCH_DURATION_S.
+            genuinely_lost = not search_state.get(
+                "launch_max_area_seen", False
+            ) and (time.time() - search_state.get("launch_last_seen", search_state["launch_start"])) >= LOST_ABORT_GRACE_S
             # Contact can only end the push early once MIN_LAUNCH_DURATION_S
             # has actually elapsed - guarantees a real push every time
             # instead of contact registering before the wheels have even
             # ramped up.
-            if elapsed < MIN_LAUNCH_DURATION_S or (not contact and elapsed < MAX_LAUNCH_DURATION_S):
+            if elapsed < MIN_LAUNCH_DURATION_S or (
+                not contact and not genuinely_lost and elapsed < MAX_LAUNCH_DURATION_S
+            ):
                 _safe_move(drive, search_state, "forward", LAUNCH_SPEED)
                 return f"Ramming forward ({elapsed:.1f}s)"
             search_state["launch_phase"] = "returning"
@@ -592,6 +636,7 @@ def defend_step(cap, drive, search_state=None):
         search_state.pop("launch_start", None)
         search_state.pop("launch_return_duration", None)
         search_state.pop("launch_max_area_seen", None)
+        search_state.pop("launch_last_seen", None)
         return "Launch complete - resuming defense"
 
     if center is None:
@@ -614,17 +659,38 @@ def defend_step(cap, drive, search_state=None):
             return f"Ball det R {coord} - moving to C (strafe right)"
         return f"Ball det R {coord} - braking before reversing to strafe right"
 
+    # Before ramming or approaching, make sure we're actually squared up on
+    # HOME_HEADING_DEG - if search drift left us rotated off-heading,
+    # driving "forward" now would push the ball off at an angle instead of
+    # straight out, which near our own goal risks deflecting it back in.
+    # Correct heading first and hold off on any forward motion until it's
+    # within tolerance.
+    heading_diff = _heading_diff(drive)
+    if abs(heading_diff) > STRAIGHT_HEADING_TOLERANCE_DEG:
+        drive.rotate_to(HOME_HEADING_DEG)
+        search_state["last_move"] = "stop"
+        return f"Ball det C {coord} - correcting heading ({heading_diff:+.0f} deg) before advancing"
+
     # Centered - launch once it's close enough (read straight off the ROI:
     # the ball's y-position in frame), otherwise just hold.
     if y >= CLOSE_Y_THRESHOLD:
         search_state["launch_phase"] = "forward"
         search_state["launch_start"] = time.time()
         search_state["launch_max_area_seen"] = False
+        search_state["launch_last_seen"] = time.time()
         _safe_move(drive, search_state, "forward", LAUNCH_SPEED)
         return f"Ball det C {coord} - close, launching forward"
 
-    _stop(drive, search_state)
-    return f"Ball det C {coord} - holding (not close)"
+    # Not close enough to ram yet, but heading's locked - approach instead
+    # of holding still, ramping speed up from APPROACH_MIN_SPEED toward
+    # LAUNCH_SPEED as the ball nears CLOSE_Y_THRESHOLD.
+    approach_ratio = max(0.0, min(1.0, y / CLOSE_Y_THRESHOLD))
+    approach_speed = int(
+        APPROACH_MIN_SPEED + approach_ratio * (LAUNCH_SPEED - APPROACH_MIN_SPEED)
+    )
+    if _safe_move(drive, search_state, "forward", approach_speed):
+        return f"Ball det C {coord} - approaching (speed={approach_speed})"
+    return f"Ball det C {coord} - braking before approaching"
 
 
 def _safe_print(*args, **kwargs):
