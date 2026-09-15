@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from guidance import GuidedDrive
-from perception import get_masks, ball_center
+from perception import get_masks, ball_center, find_goal_gap
 
 # Alternate strategy to main.py's chase-and-approach: instead of turning
 # to face the ball and driving straight at it, hold position (facing one
@@ -38,19 +38,18 @@ BALL_ROI_Y_START = int(FRAME_HEIGHT * 0.35)
 # during strafe was - RL/RR (trim 1.0) got the full duty and spun, FL/FR
 # didn't clear the stall threshold.
 #
-# Was pushed 60 -> 65 -> 75 -> 85 in one session without ever confirming
-# on real hardware whether the same-board-opposite-channel glitch (a wheel
-# visibly flipping direction mid-hold, see CALIBRATION_REPORT.md) or a
-# brownout (movement/movement.py's soft-start exists because current
-# spikes were already dropping the Pi at lower speeds) showed up at any
-# of those steps. Reset back down to the documented safe ceiling to
-# restart that process properly: test at 60 first, confirm it's clean on
-# the actual robot, and only then step up in small increments (e.g. +5),
-# re-testing after each step, rather than jumping straight to a high
-# number again.
+# Was pushed 60 -> 65 -> 75 -> 85 in one earlier session without ever
+# confirming on real hardware whether the same-board-opposite-channel
+# glitch (a wheel visibly flipping direction mid-hold, see
+# CALIBRATION_REPORT.md) or a brownout (movement/movement.py's soft-start
+# exists because current spikes were already dropping the Pi at lower
+# speeds) showed up at any of those steps. Reset to the documented safe
+# ceiling (60), then stepped back up in smaller +5 increments (65 -> 70) -
+# stay alert for the direction-flip glitch; if it shows up, that's
+# confirmation to drop back down rather than stepping further up.
 ZONE_LEFT_FRACTION = 1 / 3
 ZONE_RIGHT_FRACTION = 2 / 3
-STRAFE_SPEED = 60
+STRAFE_SPEED = 70
 
 # "Close" is read straight off the ROI: once the ball's centroid is this
 # far down the frame, it's near enough to hit. PLACEHOLDER - tune against
@@ -97,6 +96,16 @@ CONTACT_Y_THRESHOLD = int(FRAME_HEIGHT * 0.92)  # PLACEHOLDER - tune against whe
 CONTACT_AREA_FRACTION = 0.35
 MAX_LAUNCH_DURATION_S = 3.5
 
+# The backward return after a ram used to be fully time-symmetric (return
+# duration == however long the forward push took) to land back at exactly
+# the pre-ram spot. Shortened here so it doesn't spend as long backing up
+# as it did ramming forward - trades some drift forward over repeated
+# rams (it won't return to the *exact* pre-ram spot) for spending less
+# time out of position/facing the wrong way after every hit. PLACEHOLDER -
+# if it drifts too far forward from its post over a match, raise this back
+# toward 1.0.
+RETURN_DURATION_FRACTION = 0.6
+
 # CLOSE_Y_THRESHOLD (where the launch triggers) and CONTACT_Y_THRESHOLD
 # (where it's declared done) aren't far apart - if the ball's already
 # near CONTACT_Y_THRESHOLD the instant the launch starts, or detection is
@@ -134,6 +143,105 @@ APPROACH_MIN_SPEED = 45
 # main.py.
 WALL_COVERAGE_THRESHOLD = 0.80
 
+# find_goal_gap() reads the goal's crossbar/frame opening out of the wall
+# mask - a wide detected gap means we're close enough to be looking right
+# into (or through) the goal structure itself, not just a flat wall. Same
+# check and threshold as main.py's "don't go into the goal" - a goalkeeper
+# ramming/drifting itself into its own goal is exactly as bad as an
+# attacker chasing the ball into one. Highest-priority failsafe: overrides
+# everything else, including an in-progress ram or pin recovery.
+GOAL_GAP_CLOSE_WIDTH_FRACTION = 0.5
+
+# Backstop for the goal-gap check above: find_goal_gap() is built to
+# recognize looking at the goal's crossbar/frame opening from a distance -
+# up close, with the ball centered right against the goal's sill/threshold,
+# that pattern isn't there anymore and the check can simply never fire.
+# This doesn't look at the camera at all - it measures how far forward
+# (dead-reckoned Y, drive.pose()) the current unbroken forward push has
+# covered - approach creep and the final ram both count as one continuous
+# excursion, since neither ever sets last_move to anything but "forward"
+# in between - and refuses to keep pushing forward past that regardless of
+# what vision says. Independent of any single perception blind spot, same
+# "vision OR position, whichever fires first" idea as the goal-gap check.
+#
+# Must clear whatever a normal, intended approach+ram actually needs to
+# travel to reach and hit the ball - set too low (40 was too tight; cut
+# real rams short before contact, causing "det C" / "ramming" / "too far"
+# to flicker rapidly instead of ever finishing a hit) and this fires on
+# every single legitimate ram instead of only the genuinely-too-far case.
+# PLACEHOLDER - tune against how far it's actually safe to advance from a
+# real defensive post before reaching the goal line; raise further if
+# normal rams still get cut short.
+MAX_FORWARD_DRIFT_CM = 100.0
+
+# WALL_COVERAGE_THRESHOLD assumes ramming into something tall enough to
+# fill most of the frame - it misses being jammed against a low physical
+# barrier (a rail, a curb, a bumper-height obstacle) that only ever fills
+# the near-field band at the bottom of view while the rest of the frame
+# still shows whatever's behind/above it. Checked against just that
+# bottom band (NEAR_ROI_Y_START) instead of the whole frame, so this can
+# be a much lower fraction than WALL_COVERAGE_THRESHOLD and still mean
+# "pinned" - PLACEHOLDER, tune against real snapshots of being stuck on
+# something low.
+NEAR_WALL_COVERAGE_THRESHOLD = 0.50
+
+# Backup for anything the wall-color checks above miss entirely (wrong
+# color, glass, another robot) - doesn't look at color at all, just
+# whether the view is actually changing while forward motion is being
+# commanded. If it stays essentially static for STUCK_CONFIRM_S straight
+# while "last_move" is forward, something's physically blocking it
+# regardless of what it looks like.
+STUCK_MOTION_DIFF_THRESHOLD = 15
+STUCK_MOTION_PIXEL_FRACTION = 0.05
+STUCK_CONFIRM_S = 0.5
+
+# How many consecutive near-identical ram frames (_ram_stalled) before
+# declaring the ram physically wedged - much shorter than STUCK_CONFIRM_S
+# since contact-area detection can otherwise resolve the ram faster than
+# a longer confirm window would ever get a chance to fire. 1 would react
+# on a single noisy/flickered frame; 2 needs it to actually hold still.
+RAM_STALL_STREAK = 2
+
+# Once pinned, just reversing the wheels doesn't always work - if it's
+# genuinely wedged (a low rail catching the chassis at an angle, not just
+# resting against a flat wall), driving straight backward can push against
+# the same jam instead of clearing it. Turning 180 degrees in place first
+# re-aims the front where the back was and vice versa, then driving
+# "forward" along that new facing is a different escape vector than
+# whatever direction caused the pin - more likely to actually break free.
+# Finishes by rotating back to HOME_HEADING_DEG so defense resumes facing
+# the right way, not backward. PLACEHOLDER - tune PIN_AWAY_DURATION_S/
+# PIN_AWAY_SPEED against how long it actually takes to clear something.
+PIN_AWAY_SPEED = 60
+PIN_AWAY_DURATION_S = 0.5
+
+# If the ball's actually visible in frame at the same moment we're pinned,
+# a full 180 flip-away abandons it and backs off further than needed. Try
+# a "hook" instead, alternating sides up to PIN_WALL_PUSH_ATTEMPTS times:
+# back away, offset sideways, then ram forward from that new angle - not
+# a straight-sideways strafe against the ball. Approaching from an angled
+# offset gives more actual leverage against something wedged than nudging
+# it directly sideways in place does (same reasoning as PIN_AWAY's 180
+# flip - a different approach vector, more likely to break something
+# genuinely stuck free), while still working the ball toward one side
+# instead of abandoning position with a full flip-away. Only falls
+# through to the full 180 flip-away if none of the attempts actually
+# clear the pin. PLACEHOLDER - tune durations/speed/attempt count against
+# how it actually behaves against a real wall+ball corner.
+PIN_HOOK_BACK_S = 0.25
+PIN_HOOK_OFFSET_S = 0.25
+PIN_HOOK_RAM_S = 0.35
+PIN_WALL_PUSH_SPEED = 55
+PIN_WALL_PUSH_ATTEMPTS = 3
+
+# The ultrasonic sensor is mounted at the REAR - it watches for something
+# (opponent, ball) closing in from behind while attention's on the front
+# camera. Can't tell which side it's coming from, and strafing wouldn't
+# increase distance from a rear threat anyway - push forward instead,
+# same reasoning and same values as main.py's rear-threat evade.
+REAR_THREAT_DISTANCE_CM = 15
+EVADE_SPEED = 60
+
 # If the camera read fails this many times in a row, assume it's actually
 # disconnected and try to reopen it.
 CAMERA_RECONNECT_AFTER = 20
@@ -143,15 +251,21 @@ CAMERA_RECONNECT_RETRY_DELAY = 1.0
 # strafes (not turns) to track/move - so when the ball isn't visible, the
 # search moves by CORD (Navigator's tracked X, drive.pose()[0]) instead of
 # an angle: strafe left until X has moved SEARCH_STRAFE_CM, checking for
-# the ball after every short burst, then (if still nothing) back to center
-# and the same distance right. Heading never changes at all here, so
-# unlike an angle-based sweep there's no "return to home heading"
+# the ball continuously along the way, then (if still nothing) back to
+# center and the same distance right. Heading never changes at all here,
+# so unlike an angle-based sweep there's no "return to home heading"
 # correction needed for that - but it still returns toward the starting X
 # if BOTH sides come up empty, so a failed search doesn't leave it
-# drifted away from its defensive spot for no reason. PLACEHOLDER - tune
-# distance/speed against the real camera's field of view and how well
-# dead reckoning tracks over that short a move.
-SEARCH_STRAFE_CM = 30
+# drifted away from its defensive spot for no reason.
+#
+# Widened from 30 - now that _strafe_until() checks continuously instead
+# of stop-and-check bursts, covering more ground doesn't cost nearly as
+# much extra time as it used to, so there's less reason to keep the sweep
+# this narrow. PLACEHOLDER - tune distance/speed against the real camera's
+# field of view and how well dead reckoning tracks over that longer a
+# move (more distance covered = more room for open-loop drift to
+# accumulate before target_x is actually reached).
+SEARCH_STRAFE_CM = 45
 SEARCH_STRAFE_TIMEOUT_S = 3.0  # safety cap in case dead-reckoning drift means the target X is never quite reached
 SEARCH_PAUSE_S = 0.4
 
@@ -176,21 +290,38 @@ SEARCH_SWEEP_DEG = 45
 # (90) each direction instead of a fixed 45, stopping the instant the ball
 # shows up rather than only checking at two fixed points. Runs at
 # ROTATE_SEARCH_SPEED (faster than the cautious 30 used elsewhere for
-# search rotation) since continuous per-step checking means it doesn't
-# need to move slowly to avoid blurring past the ball between checks the
-# way a big blind jump would - some motion-blur risk traded for reaction
-# speed. Always returns to HOME_HEADING_DEG afterward, same as the
-# original sweep.
+# search rotation) since per-step checking means it doesn't need to move
+# slowly to avoid blurring past the ball between checks the way a big
+# blind jump would. Always returns to HOME_HEADING_DEG afterward, same as
+# the original sweep.
+#
+# _rotate_sweep_side used to capture WHILE STILL ACTIVELY ROTATING (never
+# stopped between the move command and the check) - real angular step per
+# check was small (~3-4deg at this speed/delay), so it wasn't skipping
+# past the ball's angular window, but every single check frame was
+# motion-blurred from spinning at full ROTATE_SEARCH_SPEED the instant it
+# was captured, which is what was actually causing "spins too fast to
+# find it". ROTATE_SEARCH_SETTLE_S adds a full stop + brief settle before
+# each check (stop-and-look, same fix as the ram/rotate search elsewhere)
+# so every check frame is sharp regardless of rotation speed.
 ROTATE_SEARCH_SWEEP_DEG = 90
-ROTATE_SEARCH_SPEED = 45
+# Lowered from 45 - stop-and-look already fixed the pure motion-blur
+# problem, but a slower rotation still gives the settle step a gentler
+# starting point to actually stop from (less momentum to kill) and a
+# smaller real angular step per check, both of which make it less likely
+# to swing past the ball between look-points.
+ROTATE_SEARCH_SPEED = 30
 ROTATE_SEARCH_STEP_DELAY_S = 0.05
+ROTATE_SEARCH_SETTLE_S = 0.15
 
 # Which _search_for_ball_* variant defend_step uses when the ball isn't
-# found - "cord" | "cord_straight" | "rotate_sweep" | "rotate_continuous".
-# All four are kept side by side (see the functions below) so this is a
-# one-line switch to compare them instead of losing old ones as new ones
-# get added.
-SEARCH_MODE = "cord"
+# found - "cord" | "cord_straight" | "rotate_sweep" | "rotate_continuous" |
+# "combined". All variants are kept side by side (see the functions below)
+# so this is a one-line switch to compare them instead of losing old ones
+# as new ones get added. "combined" (rotate sweep first, cord fallback) is
+# now the default - wider angular coverage than pure strafing, without
+# losing the strafe search entirely.
+SEARCH_MODE = "combined"
 
 # Second ROI, separate from BALL_ROI_Y_START: a narrow band right at the
 # bottom of the frame (closest to the camera) for motion detection - "is
@@ -293,6 +424,94 @@ def _largest_centroid(mask, min_area):
     return (int(m["m10"] / m["m00"]), int(m["m01"] / m["m00"]))
 
 
+def _near_wall_pinned(masks):
+    # Same idea as the whole-frame WALL_COVERAGE_THRESHOLD check, but
+    # restricted to the near-field band at the bottom of the frame - catches
+    # being jammed against something low that never fills most of the view.
+    near_wall = masks["wall"][NEAR_ROI_Y_START:, :]
+    return float((near_wall > 0).mean()) >= NEAR_WALL_COVERAGE_THRESHOLD
+
+
+def _wall_flanks_target(masks):
+    # _near_wall_pinned checks the WHOLE near-band width - but exactly
+    # when a ball is centered right up against a wall (the case that
+    # matters most for the ram-contact wall-push check), the ball's own
+    # green blob occludes the center of that band, pulling the average
+    # coverage down and making the check fail right when it should fire.
+    # This checks only the LEFT and RIGHT thirds instead, where the ball
+    # (usually centered) isn't blocking the view - a wall/rail visible on
+    # both flanks at close range is a strong signal regardless of what's
+    # occluding the middle.
+    near_wall = masks["wall"][NEAR_ROI_Y_START:, :]
+    width = near_wall.shape[1]
+    third = width // 3
+    left = near_wall[:, :third]
+    right = near_wall[:, -third:]
+    left_frac = float((left > 0).mean())
+    right_frac = float((right > 0).mean())
+    return left_frac >= NEAR_WALL_COVERAGE_THRESHOLD and right_frac >= NEAR_WALL_COVERAGE_THRESHOLD
+
+
+def _ram_stalled(frame, search_state):
+    # Wall-color checks (_near_wall_pinned, _wall_flanks_target) can still
+    # miss a wedge if the ball's grown big enough to cover the flanks too,
+    # or if what it's wedged against isn't the tuned wall color at all.
+    # This doesn't look at color - just whether the view is changing at
+    # all frame-to-frame while ramming at full speed. A couple of
+    # consecutive near-identical frames (RAM_STALL_STREAK) means nothing's
+    # actually still traveling, regardless of what's blocking it or
+    # whether the ball's mask has crossed CONTACT_AREA_FRACTION yet - a
+    # ram wedged at an angle might never grow to fill that much of the
+    # frame at all. Deliberately a much shorter confirm window than
+    # _is_stuck's STUCK_CONFIRM_S: that one was tuned conservatively for
+    # the general case, but here contact-area detection can resolve (and
+    # move the ram on to "returning") faster than a 0.5s window would ever
+    # get to fire, letting a real wedge slip through undetected.
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    prev = search_state.get("ram_prev_gray")
+    search_state["ram_prev_gray"] = gray
+    if prev is None or prev.shape != gray.shape:
+        search_state["ram_static_streak"] = 0
+        return False
+    diff = cv2.absdiff(gray, prev)
+    changed_fraction = float((diff > STUCK_MOTION_DIFF_THRESHOLD).mean())
+    if changed_fraction >= STUCK_MOTION_PIXEL_FRACTION:
+        search_state["ram_static_streak"] = 0
+        return False
+    search_state["ram_static_streak"] = search_state.get("ram_static_streak", 0) + 1
+    return search_state["ram_static_streak"] >= RAM_STALL_STREAK
+
+
+def _is_stuck(frame, search_state):
+    # Color-independent backup: is the view actually changing while we're
+    # commanding forward motion? If it stays essentially static for
+    # STUCK_CONFIRM_S while last_move is "forward", something's physically
+    # blocking movement regardless of what it looks like (wrong-colored
+    # obstacle, glass, another robot). Only meaningful while genuinely
+    # trying to drive forward - gated the same way as _near_field_motion,
+    # just on the opposite last_move value.
+    if search_state.get("last_move") != "forward":
+        search_state.pop("stuck_ref", None)
+        search_state.pop("stuck_since", None)
+        return False
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    ref = search_state.get("stuck_ref")
+    search_state["stuck_ref"] = gray
+    now = time.time()
+    if ref is None or ref.shape != gray.shape:
+        search_state["stuck_since"] = now
+        return False
+
+    diff = cv2.absdiff(gray, ref)
+    changed_fraction = float((diff > STUCK_MOTION_DIFF_THRESHOLD).mean())
+    if changed_fraction >= STUCK_MOTION_PIXEL_FRACTION:
+        search_state["stuck_since"] = now
+        return False
+
+    return (now - search_state.get("stuck_since", now)) >= STUCK_CONFIRM_S
+
+
 def _near_field_motion(frame, search_state):
     # Frame-differencing within the near-field ROI only - returns True if
     # enough of that band changed since the last check to call it
@@ -324,22 +543,69 @@ def _ball_zone(center_x, frame_width):
     return "C"
 
 
+# Strafing purely toward the ball's CURRENT x-position always reacts a beat
+# late - by the time it's centered, a fast diagonal shot has already moved
+# on. Instead, estimate lateral velocity from frame-to-frame x movement and
+# aim at where the ball will be after LEAD_TIME_S, not where it is now.
+# LEAD_TIME_S is a rough stand-in for total reaction+strafe-spin-up delay,
+# not a measured value - PLACEHOLDER, tune against how early it actually
+# needs to start moving to catch a fast real shot.
+LEAD_TIME_S = 0.2
+# Cap how far the prediction can shift the aim point - raw per-frame
+# velocity from a small, noisy 320x240 centroid is jumpy, and an
+# uncapped extrapolation on a bad frame could aim it wildly off to one
+# side. This bounds the worst case to a fraction of the frame width.
+MAX_LEAD_PX = int(FRAME_WIDTH * 0.35)
+# If the gap since the last tracked frame is bigger than this, the ball
+# was probably just reacquired after a search/loss (not continuously
+# tracked) - a velocity computed across that gap would be meaningless, so
+# skip the lead and use the raw position for one frame instead.
+MAX_VELOCITY_DT_S = 0.5
+
+
+def _lead_adjusted_x(x, kind, search_state):
+    # kind distinguishes ball vs. blue-chassis targets - switching between
+    # them mid-track is a jump in what's being measured, not real motion,
+    # so that case also skips the lead for one frame (same as a stale gap).
+    now = time.time()
+    prev_x = search_state.get("track_prev_x")
+    prev_t = search_state.get("track_prev_t")
+    prev_kind = search_state.get("track_prev_kind")
+    search_state["track_prev_x"] = x
+    search_state["track_prev_t"] = now
+    search_state["track_prev_kind"] = kind
+    if prev_x is None or prev_kind != kind:
+        return x
+    dt = now - prev_t
+    if dt <= 0 or dt > MAX_VELOCITY_DT_S:
+        return x
+    lead_px = max(-MAX_LEAD_PX, min(MAX_LEAD_PX, ((x - prev_x) / dt) * LEAD_TIME_S))
+    return x + lead_px
+
+
 def _find_target(frame, masks):
-    # Ball first, blue chassis (opponent) as fallback - same priority as
-    # the main per-frame check in defend_step, applied consistently across
-    # every search variant so the search hunts for either one, not just
-    # the ball.
-    center = ball_center(_ball_roi(masks["ball"]))
-    if center is not None:
-        return center
-    return _largest_centroid(_blue_mask(frame), min_area=30)
+    # Ball only for now - blue-chassis (opponent) ramming is disabled, not
+    # deleted, in case it's wanted again later. Was: ball first, blue
+    # chassis as fallback, applied consistently across every search
+    # variant so the search hunted for either one, not just the ball.
+    return ball_center(_ball_roi(masks["ball"]))
+    # center = ball_center(_ball_roi(masks["ball"]))
+    # if center is not None:
+    #     return center
+    # return _largest_centroid(_blue_mask(frame), min_area=30)
 
 
 def _strafe_until(cap, drive, target_x, move):
-    # Blocking: strafes in short bursts (move = "strafe_left" or
-    # "strafe_right"), checking the tracked X (Navigator's dead reckoning
-    # - cord, not an angle/heading) and the target after every burst.
-    # Stops and returns the instant either it's spotted or target_x is
+    # Blocking: strafes CONTINUOUSLY (no stop-and-check burst pattern),
+    # checking every loop iteration against the tracked X (Navigator's
+    # dead reckoning - cord, not an angle/heading) and the target. Used to
+    # stop and settle before every single check (SEARCH_PAUSE_S), but that
+    # stop/restart cycle plus the fixed pause cost real time on every
+    # iteration regardless of how much ground actually needed covering -
+    # removed since the ball is a large, easy color blob with no
+    # circularity filter here, unlike the rotate search's motion-blur
+    # problem, so it doesn't need a fully-stopped, blur-free frame to spot
+    # it. Stops and returns the instant either it's spotted or target_x is
     # reached, whichever comes first. SEARCH_STRAFE_TIMEOUT_S is a safety
     # cap in case dead-reckoning drift means target_x never quite gets
     # hit.
@@ -350,13 +616,12 @@ def _strafe_until(cap, drive, target_x, move):
         if reached:
             break
         getattr(drive, move)(speed=STRAFE_SPEED)
-        time.sleep(SEARCH_PAUSE_S)
-        drive.stop()
         ret, frame = cap.read()
         if ret:
             masks = get_masks(frame)
             center = _find_target(frame, masks)
             if center is not None:
+                drive.stop()
                 return frame, masks, center
     drive.stop()
     return None, None, None
@@ -474,17 +739,24 @@ def _search_for_ball_rotate_sweep(cap, drive):
 
 
 def _rotate_sweep_side(cap, drive, move):
-    # Continuously rotates (small steps, checking every step) up to
-    # ROTATE_SEARCH_SWEEP_DEG in one direction, stopping the instant the
-    # ball's spotted. Unlike _search_for_ball_rotate_sweep's one big blind
-    # rotate_to() jump per side, this checks constantly along the way, so
-    # it can afford to move faster without as much risk of blurring past
-    # the ball between checks.
+    # Small steps, stop-and-look at every step, up to ROTATE_SEARCH_SWEEP_DEG
+    # in one direction - stopping the instant the ball's spotted. Unlike
+    # _search_for_ball_rotate_sweep's one big blind rotate_to() jump per
+    # side, this checks constantly along the way, so it can afford to move
+    # faster without skipping past the ball's angular window between
+    # checks. Used to capture WHILE STILL ROTATING (no stop between the
+    # move command and the check) - that made every check frame
+    # motion-blurred regardless of how small the per-step angle was, which
+    # is what was actually causing it to spin right past the ball without
+    # recognizing it. Now comes to a full stop and settles briefly first,
+    # so every check frame is sharp.
     swept = 0.0
     last_heading = drive.pose()[2]
     while swept < ROTATE_SEARCH_SWEEP_DEG:
         getattr(drive, move)(speed=ROTATE_SEARCH_SPEED)
         time.sleep(ROTATE_SEARCH_STEP_DELAY_S)
+        drive.stop()
+        time.sleep(ROTATE_SEARCH_SETTLE_S)
         heading = drive.pose()[2]
         swept += abs((heading - last_heading + 180) % 360 - 180)
         last_heading = heading
@@ -519,11 +791,36 @@ def _search_for_ball_rotate_continuous(cap, drive):
     return frame, masks, _find_target(frame, masks)
 
 
+def _search_for_ball_combined(cap, drive):
+    # Strafe search is the main/first search - runs a full cycle (left,
+    # back to center, right, back to center - see _search_for_ball) since
+    # that's the more dead-reckoning-repeatable search and keeps the bot
+    # closer to its actual defensive line the whole time. Only if BOTH
+    # strafe legs come up empty does it fall back to the wider-angle
+    # rotate search, which covers angles pure strafing structurally can't
+    # (it never turns the camera, only slides sideways while still facing
+    # forward) - a last resort, not the first try, since it takes the bot
+    # off its home heading for longer.
+    #
+    # Uses the CONTINUOUS rotate variant (_search_for_ball_rotate_continuous
+    # / _rotate_sweep_side), not _search_for_ball_rotate_sweep - that one
+    # only ever checks at two blind endpoints (-45deg, +45deg) with a big
+    # blocking rotate_to() between them, so a ball anywhere in between
+    # those two exact angles is swept straight past unseen. The continuous
+    # variant checks in small steps throughout the whole sweep instead, so
+    # it actually covers the angles in between, not just the endpoints.
+    frame, masks, center = _search_for_ball(cap, drive)
+    if center is not None:
+        return frame, masks, center
+    return _search_for_ball_rotate_continuous(cap, drive)
+
+
 _SEARCH_MODES = {
     "cord": _search_for_ball,
     "cord_straight": _search_for_ball_straight,
     "rotate_sweep": _search_for_ball_rotate_sweep,
     "rotate_continuous": _search_for_ball_rotate_continuous,
+    "combined": _search_for_ball_combined,
 }
 
 
@@ -552,24 +849,182 @@ def defend_step(cap, drive, search_state=None):
     ball_mask = _ball_roi(masks["ball"])
     center = ball_center(ball_mask)
     target_mask = ball_mask
-    if center is None:
-        # No ball this frame - check for the opponent chassis (blue) as a
-        # fallback target. Same zone/launch machinery below then centers
-        # on and rams whichever one was actually found - target_mask
-        # tracks which one, so the ram's contact-area check (below) reads
-        # area from the right mask instead of always assuming the ball.
-        blue_mask = _blue_mask(frame)
-        blue_center = _largest_centroid(blue_mask, min_area=30)
-        if blue_center is not None:
-            center = blue_center
-            target_mask = blue_mask
+    # Blue-chassis (opponent) ramming fallback disabled, not deleted - in
+    # case it's wanted again later. Was: fall back to the largest blue
+    # blob as the target whenever the ball isn't seen, with target_mask
+    # tracking which one so the ram's contact-area check below reads area
+    # from the right mask instead of always assuming the ball.
+    # if center is None:
+    #     blue_mask = _blue_mask(frame)
+    #     blue_center = _largest_centroid(blue_mask, min_area=30)
+    #     if blue_center is not None:
+    #         center = blue_center
+    #         target_mask = blue_mask
+
+    # --- Highest-priority failsafe: don't ram/drift into our own goal ---
+    # Overrides everything below, including an in-progress ram or pin
+    # recovery - being inside the goal opening is worse than whatever
+    # those were handling. Two independent signals, either one triggers:
+    # vision (find_goal_gap - can miss up-close/off-angle views where the
+    # goal's crossbar pattern isn't recognizable) OR position (dead-
+    # reckoned forward drift - doesn't depend on what the camera sees).
+    #
+    # The position reference resets to the current spot every time the
+    # bot ISN'T actively driving forward (search, strafe, holding, back
+    # up) and only accumulates across consecutive forward-only steps -
+    # this measures "how far has THIS forward push gone", not cumulative
+    # distance since the whole run started. RETURN_DURATION_FRACTION
+    # deliberately doesn't return all the way after every ram, so
+    # cumulative-since-start drift builds up over a match even nowhere
+    # near the goal and would false-trigger this on a totally normal ram.
+    if search_state.get("last_move") != "forward":
+        search_state["forward_excursion_start_y"] = drive.pose()[1]
+    forward_drift_cm = drive.pose()[1] - search_state.get(
+        "forward_excursion_start_y", drive.pose()[1]
+    )
+    gap = find_goal_gap(masks["wall"])
+    close_by_vision = gap is not None and gap["width_px"] >= GOAL_GAP_CLOSE_WIDTH_FRACTION * frame.shape[1]
+    close_by_position = forward_drift_cm >= MAX_FORWARD_DRIFT_CM
+    if close_by_vision or close_by_position:
+        reason = "Near goal opening" if close_by_vision else f"Ramming {forward_drift_cm:.0f}cm straight, too far"
+        search_state.pop("launch_phase", None)
+        search_state.pop("pin_phase", None)
+        search_state.pop("pin_push_start", None)
+        search_state.pop("pin_push_direction", None)
+        search_state.pop("pin_push_attempt", None)
+        search_state.pop("pin_target_heading", None)
+        search_state.pop("pin_away_start", None)
+        if _safe_move(drive, search_state, "backward"):
+            return f"{reason} - backing out"
+        return f"{reason} - braking before backing out"
 
     wall_fraction = float((masks["wall"] > 0).mean())
-    if wall_fraction >= WALL_COVERAGE_THRESHOLD:
+    near_wall_pinned = _near_wall_pinned(masks)
+    stuck = _is_stuck(frame, search_state)
+    pinned = wall_fraction >= WALL_COVERAGE_THRESHOLD or near_wall_pinned or stuck
+    if stuck:
+        pin_reason = "Stuck (view static while driving forward)"
+    elif near_wall_pinned:
+        pin_reason = "Low obstacle fills near-field view"
+    else:
+        pin_reason = f"Wall fills {wall_fraction * 100:.0f}% of view"
+
+    # Continue an in-progress pin-recovery maneuver before anything below
+    # gets a chance to re-detect the same pin and restart it every frame.
+    pin_phase = search_state.get("pin_phase")
+    if pin_phase is not None:
+        if pin_phase == "wall_push":
+            if not pinned:
+                search_state.pop("pin_phase", None)
+                search_state.pop("pin_push_start", None)
+                search_state.pop("pin_push_direction", None)
+                search_state.pop("pin_push_attempt", None)
+                search_state.pop("hook_subphase", None)
+                _stop(drive, search_state)
+                return "Unpinned - resuming defense"
+            # "Hook" maneuver, not a straight-sideways strafe: back away,
+            # offset to the OPPOSITE side of the target push direction,
+            # then ram forward - approaching from that angled offset gives
+            # more real leverage against something wedged than nudging it
+            # directly sideways in place (same idea as PIN_AWAY's 180 flip
+            # - a different approach vector). direction is which way we're
+            # trying to push the ball; offset_move is the side we swing
+            # out to first so the ram comes in from an angle.
+            direction = search_state["pin_push_direction"]
+            offset_move = "strafe_right" if direction == "strafe_left" else "strafe_left"
+            subphase = search_state.get("hook_subphase", "back")
+            sub_elapsed = time.time() - search_state["pin_push_start"]
+            if subphase == "back":
+                if sub_elapsed < PIN_HOOK_BACK_S:
+                    if _safe_move(drive, search_state, "backward", PIN_WALL_PUSH_SPEED):
+                        return f"Pinned with ball - hooking {direction}: backing off ({sub_elapsed:.1f}s)"
+                    return f"Pinned with ball - braking before hooking {direction}"
+                search_state["hook_subphase"] = "offset"
+                search_state["pin_push_start"] = time.time()
+                _stop(drive, search_state)
+                return f"Pinned with ball - hooking {direction}: repositioning"
+            if subphase == "offset":
+                if sub_elapsed < PIN_HOOK_OFFSET_S:
+                    if _safe_move(drive, search_state, offset_move, PIN_WALL_PUSH_SPEED):
+                        return f"Pinned with ball - hooking {direction}: offsetting ({sub_elapsed:.1f}s)"
+                    return f"Pinned with ball - braking before offsetting"
+                search_state["hook_subphase"] = "ram"
+                search_state["pin_push_start"] = time.time()
+                _stop(drive, search_state)
+                return f"Pinned with ball - hooking {direction}: ramming"
+            # subphase == "ram"
+            if sub_elapsed < PIN_HOOK_RAM_S:
+                if _safe_move(drive, search_state, "forward", PIN_WALL_PUSH_SPEED):
+                    return f"Pinned with ball - hooking {direction}: ram ({sub_elapsed:.1f}s)"
+                return f"Pinned with ball - braking before ram"
+            search_state.pop("hook_subphase", None)
+            search_state["pin_push_attempt"] += 1
+            if search_state["pin_push_attempt"] >= PIN_WALL_PUSH_ATTEMPTS:
+                # Alternating hooks didn't clear it - fall back to the
+                # full flip-away instead of giving up.
+                search_state.pop("pin_push_start", None)
+                search_state.pop("pin_push_direction", None)
+                search_state.pop("pin_push_attempt", None)
+                heading_now = drive.pose()[2]
+                search_state["pin_phase"] = "turn"
+                search_state["pin_target_heading"] = (heading_now + 180) % 360
+                _stop(drive, search_state)
+                return "Hook attempts exhausted - flipping 180 to reface"
+            search_state["pin_push_direction"] = (
+                "strafe_right" if direction == "strafe_left" else "strafe_left"
+            )
+            search_state["pin_push_start"] = time.time()
+            _stop(drive, search_state)
+            return f"Pinned with ball - trying other side (attempt {search_state['pin_push_attempt']})"
+        if pin_phase == "turn":
+            drive.rotate_to(search_state["pin_target_heading"])
+            search_state["last_move"] = "stop"
+            search_state["pin_phase"] = "away"
+            search_state["pin_away_start"] = time.time()
+            return "Pinned - flipped 180, clearing along new facing"
+        if pin_phase == "away":
+            elapsed = time.time() - search_state["pin_away_start"]
+            if elapsed < PIN_AWAY_DURATION_S:
+                if _safe_move(drive, search_state, "forward", PIN_AWAY_SPEED):
+                    return f"Pinned - clearing obstacle ({elapsed:.1f}s)"
+                return f"Pinned - braking before clearing ({elapsed:.1f}s)"
+            search_state["pin_phase"] = "restore"
+            return "Pinned - clear, restoring heading"
+        # pin_phase == "restore"
+        drive.rotate_to(HOME_HEADING_DEG)
+        search_state["last_move"] = "stop"
+        search_state.pop("pin_phase", None)
+        search_state.pop("pin_target_heading", None)
+        search_state.pop("pin_away_start", None)
+        return "Unpinned - resuming defense"
+
+    if pinned:
         search_state.pop("launch_phase", None)
-        if _safe_move(drive, search_state, "backward"):
-            return f"Wall fills {wall_fraction * 100:.0f}% of view - backing up"
-        return f"Wall fills {wall_fraction * 100:.0f}% of view - braking before backing up"
+        if center is not None:
+            # Ball's right here too - try pushing it left, then right if
+            # that doesn't clear it, alternating a few times instead of
+            # immediately abandoning position with a full 180 flip-away.
+            search_state["pin_phase"] = "wall_push"
+            search_state["pin_push_direction"] = "strafe_left"
+            search_state["pin_push_start"] = time.time()
+            search_state["pin_push_attempt"] = 1
+            _stop(drive, search_state)
+            return f"{pin_reason} - ball in frame, pushing left"
+        heading_now = drive.pose()[2]
+        search_state["pin_phase"] = "turn"
+        search_state["pin_target_heading"] = (heading_now + 180) % 360
+        _stop(drive, search_state)
+        return f"{pin_reason} - pinned, flipping 180 to reface"
+
+    # --- Rear ultrasonic threat - overrides everything below, including an
+    # in-progress ram, same as the wall-safety check above. ---------------
+    distance = drive.get_distance()
+    rear_threat = distance is not None and distance < REAR_THREAT_DISTANCE_CM
+    if rear_threat:
+        search_state.pop("launch_phase", None)
+        if _safe_move(drive, search_state, "forward", EVADE_SPEED):
+            return f"Rear threat at {distance:.0f}cm - pushing forward"
+        return f"Rear threat at {distance:.0f}cm - braking before pushing forward"
 
     # Only fires while stationary (see _near_field_motion) - a launch or
     # strafe already in progress isn't interrupted by this.
@@ -614,19 +1069,106 @@ def defend_step(cap, drive, search_state=None):
             genuinely_lost = not search_state.get(
                 "launch_max_area_seen", False
             ) and (time.time() - search_state.get("launch_last_seen", search_state["launch_start"])) >= LOST_ABORT_GRACE_S
+            # Checked every ram step, not just once contact triggers - a
+            # ram wedged at an angle might never grow to cross
+            # CONTACT_AREA_FRACTION at all, so waiting for "contact" before
+            # ever checking for a wedge could miss it entirely. See
+            # _ram_stalled for why this doesn't reuse the slower
+            # STUCK_CONFIRM_S-based _is_stuck.
+            stalled = elapsed >= MIN_LAUNCH_DURATION_S and _ram_stalled(frame, search_state)
             # Contact can only end the push early once MIN_LAUNCH_DURATION_S
             # has actually elapsed - guarantees a real push every time
             # instead of contact registering before the wheels have even
             # ramped up.
             if elapsed < MIN_LAUNCH_DURATION_S or (
-                not contact and not genuinely_lost and elapsed < MAX_LAUNCH_DURATION_S
+                not contact and not stalled and not genuinely_lost and elapsed < MAX_LAUNCH_DURATION_S
             ):
                 _safe_move(drive, search_state, "forward", LAUNCH_SPEED)
                 return f"Ramming forward ({elapsed:.1f}s)"
+            search_state.pop("ram_prev_gray", None)
+            search_state.pop("ram_static_streak", None)
+            # "Contact"/stalled while the wall's also right there usually
+            # means the ball got wedged against it, not cleanly hit - the
+            # ram reads as a success (area/view-static triggered it) but
+            # the ball never actually went anywhere because the wall
+            # blocked it. Try alternating strafe nudges to walk it out of
+            # the corner before just backing off and leaving it stuck
+            # there. `stalled` alone is enough regardless of wall-color
+            # signals - a static view while ramming at full speed means
+            # something's physically blocking progress no matter what it
+            # looks like. _wall_flanks_target checks the near-band's
+            # LEFT/RIGHT thirds only, which the ball itself doesn't
+            # occlude when centered - near_wall_pinned/wall_fraction alone
+            # were unreliable here since the ball sitting right in front of
+            # the wall blocks most of the very pixels those checks look at.
+            ball_against_wall = (
+                stalled
+                or wall_fraction >= WALL_COVERAGE_THRESHOLD * 0.5
+                or near_wall_pinned
+                or _wall_flanks_target(masks)
+            )
+            if (contact or stalled) and ball_against_wall:
+                search_state["launch_phase"] = "ram_wall_push"
+                search_state["launch_return_duration"] = elapsed * RETURN_DURATION_FRACTION
+                search_state["pin_push_direction"] = "strafe_left"
+                search_state["pin_push_start"] = time.time()
+                search_state["pin_push_attempt"] = 1
+                return "Contact against wall - pushing left to free the ball"
             search_state["launch_phase"] = "returning"
-            search_state["launch_return_duration"] = elapsed
+            search_state["launch_return_duration"] = elapsed * RETURN_DURATION_FRACTION
             search_state["launch_start"] = time.time()
             elapsed = 0.0
+        if launch_phase == "ram_wall_push":
+            # Same "hook" idea as the general pin_phase == "wall_push"
+            # above (back away, offset opposite the target push direction,
+            # ram forward from that angle) instead of a straight-sideways
+            # nudge - more leverage against something genuinely wedged.
+            direction = search_state["pin_push_direction"]
+            offset_move = "strafe_right" if direction == "strafe_left" else "strafe_left"
+            subphase = search_state.get("hook_subphase", "back")
+            sub_elapsed = time.time() - search_state["pin_push_start"]
+            if subphase == "back":
+                if sub_elapsed < PIN_HOOK_BACK_S:
+                    getattr(drive, "backward")(speed=PIN_WALL_PUSH_SPEED)
+                    search_state["last_move"] = "backward"
+                    return f"Freeing ball {direction}: backing off ({sub_elapsed:.1f}s)"
+                search_state["hook_subphase"] = "offset"
+                search_state["pin_push_start"] = time.time()
+                _stop(drive, search_state)
+                return f"Freeing ball {direction}: repositioning"
+            if subphase == "offset":
+                if sub_elapsed < PIN_HOOK_OFFSET_S:
+                    getattr(drive, offset_move)(speed=PIN_WALL_PUSH_SPEED)
+                    search_state["last_move"] = offset_move
+                    return f"Freeing ball {direction}: offsetting ({sub_elapsed:.1f}s)"
+                search_state["hook_subphase"] = "ram"
+                search_state["pin_push_start"] = time.time()
+                _stop(drive, search_state)
+                return f"Freeing ball {direction}: ramming"
+            # subphase == "ram"
+            if sub_elapsed < PIN_HOOK_RAM_S:
+                getattr(drive, "forward")(speed=PIN_WALL_PUSH_SPEED)
+                search_state["last_move"] = "forward"
+                attempt = search_state["pin_push_attempt"]
+                return f"Freeing ball {direction}: ram (attempt {attempt}, {sub_elapsed:.1f}s)"
+            search_state.pop("hook_subphase", None)
+            search_state["pin_push_attempt"] += 1
+            if search_state["pin_push_attempt"] >= PIN_WALL_PUSH_ATTEMPTS:
+                # Couldn't free it - give up hooking and just return to
+                # post the normal way rather than repeating forever.
+                search_state.pop("pin_push_start", None)
+                search_state.pop("pin_push_direction", None)
+                search_state.pop("pin_push_attempt", None)
+                search_state["launch_phase"] = "returning"
+                search_state["launch_start"] = time.time()
+                _stop(drive, search_state)
+                return "Couldn't free ball from wall - returning to post"
+            search_state["pin_push_direction"] = (
+                "strafe_right" if direction == "strafe_left" else "strafe_left"
+            )
+            search_state["pin_push_start"] = time.time()
+            _stop(drive, search_state)
+            return f"Trying other side (attempt {search_state['pin_push_attempt']})"
         return_duration = search_state.get("launch_return_duration", MAX_LAUNCH_DURATION_S)
         if elapsed < return_duration:
             if _safe_move(drive, search_state, "backward", LAUNCH_SPEED):
@@ -640,6 +1182,12 @@ def defend_step(cap, drive, search_state=None):
         return "Launch complete - resuming defense"
 
     if center is None:
+        # About to search - any velocity estimate from before this gap is
+        # meaningless once reacquired, so drop it instead of relying on the
+        # dt/kind guards in _lead_adjusted_x to catch it.
+        search_state.pop("track_prev_x", None)
+        search_state.pop("track_prev_t", None)
+        search_state.pop("track_prev_kind", None)
         frame, masks, center = _SEARCH_MODES[SEARCH_MODE](cap, drive)
         search_state["last_move"] = "stop"  # every _search_for_ball_* variant always ends stopped
         if center is None:
@@ -647,8 +1195,10 @@ def defend_step(cap, drive, search_state=None):
             return "No ball found (strafed L/R) - holding position"
 
     x, y = center
-    zone = _ball_zone(x, frame.shape[1])
-    coord = f"(x={x}, y={y})"
+    target_kind = "ball" if target_mask is ball_mask else "blue"
+    lead_x = _lead_adjusted_x(x, target_kind, search_state)
+    zone = _ball_zone(lead_x, frame.shape[1])
+    coord = f"(x={x}, lead_x={lead_x:.0f}, y={y})"
 
     if zone == "L":
         if _safe_move(drive, search_state, "strafe_left", STRAFE_SPEED):
@@ -678,6 +1228,8 @@ def defend_step(cap, drive, search_state=None):
         search_state["launch_start"] = time.time()
         search_state["launch_max_area_seen"] = False
         search_state["launch_last_seen"] = time.time()
+        search_state.pop("ram_prev_gray", None)
+        search_state.pop("ram_static_streak", None)
         _safe_move(drive, search_state, "forward", LAUNCH_SPEED)
         return f"Ball det C {coord} - close, launching forward"
 
