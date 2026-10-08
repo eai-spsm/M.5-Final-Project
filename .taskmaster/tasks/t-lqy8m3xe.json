@@ -3,11 +3,11 @@
   "title": "Test 01",
   "brief": "test task for coding agent edit read me",
   "role": "custom",
-  "assignee": null,
-  "status": "todo",
+  "assignee": "Ray0737",
+  "status": "doing",
   "files": [],
-  "branch": null,
+  "branch": "tm/Ray0737/t-lqy8m3xe",
   "createdBy": "Ray0737",
   "createdAt": "2026-10-08T14:46:11.393Z",
-  "updatedAt": "2026-10-08T14:46:28.553Z"
+  "updatedAt": "2026-10-08T14:46:45.757Z"
 }
