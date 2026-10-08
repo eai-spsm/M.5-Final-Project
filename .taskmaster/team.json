@@ -1,0 +1,32 @@
+{
+  "lead": "Ray0737",
+  "members": [
+    {
+      "login": "Ray0737",
+      "role": "custom",
+      "joinedAt": "2026-10-08T14:44:42.524Z"
+    }
+  ],
+  "roles": [
+    {
+      "id": "frontend",
+      "label": "Front end",
+      "prompt": "UI, components, styling, client state"
+    },
+    {
+      "id": "backend",
+      "label": "Back end",
+      "prompt": "API, server logic, auth"
+    },
+    {
+      "id": "data",
+      "label": "DB / MCP",
+      "prompt": "schema, migrations, MCP servers, integrations"
+    },
+    {
+      "id": "custom",
+      "label": "Custom",
+      "prompt": ""
+    }
+  ]
+}
