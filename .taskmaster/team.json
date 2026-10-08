@@ -27,6 +27,11 @@
       "id": "custom",
       "label": "Custom",
       "prompt": ""
+    },
+    {
+      "id": "tester",
+      "label": "tester",
+      "prompt": ""
     }
   ]
 }
