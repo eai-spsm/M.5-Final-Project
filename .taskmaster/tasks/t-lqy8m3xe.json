@@ -1,7 +1,7 @@
 {
   "id": "t-lqy8m3xe",
   "title": "Test 01",
-  "brief": "test task for ",
+  "brief": "test task for coding agent edit read me",
   "role": "custom",
   "assignee": null,
   "status": "todo",
@@ -9,5 +9,5 @@
   "branch": null,
   "createdBy": "Ray0737",
   "createdAt": "2026-10-08T14:46:11.393Z",
-  "updatedAt": "2026-10-08T14:46:21.655Z"
+  "updatedAt": "2026-10-08T14:46:28.553Z"
 }
