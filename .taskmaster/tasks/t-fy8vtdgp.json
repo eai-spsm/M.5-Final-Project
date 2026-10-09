@@ -1,0 +1,13 @@
+{
+  "id": "t-fy8vtdgp",
+  "title": "Mock task: test goalkeeper ram logic",
+  "brief": "Dry-run check for goalkeeper ram/abort logic. Read the ram lost-abort and approach speed ramp code. Confirm it aborts when the ball is lost. Report what you find, no code changes.",
+  "role": "custom",
+  "assignee": "ailarp07",
+  "status": "todo",
+  "files": [],
+  "branch": null,
+  "createdBy": "Ray0737",
+  "createdAt": "2026-10-09T07:19:41.210Z",
+  "updatedAt": "2026-10-09T07:19:41.211Z"
+}
